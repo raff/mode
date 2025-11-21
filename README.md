@@ -17,3 +17,4 @@ Usage: mode [options] [filename]
    -wpm int
     	words per minute (for timing) (default 20)
 
+<img width="1594" height="766" alt="screenshot" src="https://github.com/user-attachments/assets/893de979-9911-44d2-9c9d-2b22626398a6" />
