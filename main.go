@@ -22,18 +22,30 @@ import (
 
 // Morse code mapping
 var morseCode = map[string]string{
+	// letters
 	".-": "A", "-...": "B", "-.-.": "C", "-..": "D",
 	".": "E", "..-.": "F", "--.": "G", "....": "H",
 	"..": "I", ".---": "J", "-.-": "K", ".-..": "L",
 	"--": "M", "-.": "N", "---": "O", ".--.": "P",
 	"--.-": "Q", ".-.": "R", "...": "S", "-": "T",
 	"..-": "U", "...-": "V", ".--": "W", "-..-": "X",
-	"-.--": "Y", "--..": "Z", ".----": "1", "..---": "2",
+	"-.--": "Y", "--..": "Z",
+
+	// digits
+	".----": "1", "..---": "2",
 	"...--": "3", "....-": "4", ".....": "5", "-....": "6",
 	"--...": "7", "---..": "8", "----.": "9", "-----": "0",
-	"..--..": "?", "-.-.--": "!", ".-.-.-": ".", "--..--": ",", "-..-.": "/", ".-..-.": "\"",
-	".----.": "'", "---...": ":", "-.-.-.": ";", "-....-": "-", "..--.-": "_", ".--.-.": "@",
-	".-.-.": "<AR>", ".-...": "<AS>", "-...-.-": "<BK>", "...-.-": "<SK>", "-...-": "<BT>", "-.--.": "<KN>",
+
+	// punctuations
+	".-..-.": "\"", "...-..-": "$", ".----.": "'", "-.--.": "[", "-.--.-": "]",
+	".-.-.": "+", "--..--": ",", "-....-": "-", ".-.-.-": ".", ".-.-.-.": ".",
+	"-..-.": "/", "---...": ":", "-.-.-.": ";", "-...-": "=", "..--..": "?",
+	".--.-.": "@", "..--.-": "_", "-.-.--": "!", "---.": "!",
+
+	// abbreviations
+	/*
+		".-.-.": "<AR>", ".-...": "<AS>", "-...-.-": "<BK>", "...-.-": "<SK>", "-...-": "<BT>", "-.--.": "<KN>",
+	*/
 }
 
 // Biquad filter struct, for bandpass filtering
@@ -359,9 +371,9 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 	// Use hysteresis: higher threshold to start, lower to continue
 	startThreshold := threshold
 	endThreshold := threshold * 0.8
-	minDuration := 0.0 // 0.01 // 10ms minimum
+	minDuration := 0.01
 
-	addTone := func(start, end int, ttype ToneType, mag float64) bool {
+	addTone := func(start, end int, ttype ToneType, mag, minDur float64) bool {
 		if start < 0 || end <= start {
 			log.Println("addtone: invalid tone segment:", start, end, ttype)
 			return false
@@ -373,7 +385,7 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 		duration := endTime - startTime
 
 		// Filter out very short segments (likely noise)
-		if duration > minDuration {
+		if duration > minDur {
 			segments = append(segments, ToneSegment{
 				Type:      ttype,
 				StartTime: startTime,
@@ -395,14 +407,14 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 	for i, v := range envelope {
 		if !inTone && v > startThreshold {
 			// Tone begins
-			if i == 0 || addTone(endIdx, i, Silence, v) { // add previous silence
+			if i == 0 || addTone(endIdx, i, Silence, v, 0) { // add previous silence
 				inTone = true
 				startIdx = i
 				endIdx = -1
 			}
 		} else if inTone && v < endThreshold {
 			// Tone ends
-			if addTone(startIdx, i, Sound, v) {
+			if addTone(startIdx, i, Sound, v, minDuration) {
 				inTone = false
 				endIdx = i
 				startIdx = -1
@@ -419,10 +431,10 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 			segments[l].EndTime += lastd
 			segments[l].Duration += lastd
 		} else if !inTone && endIdx < last {
-			addTone(endIdx, last, Silence, 0) // add last silence
+			addTone(endIdx, last, Silence, 0, 0) // add last silence
 		}
 	} else if inTone && startIdx >= 0 {
-		addTone(startIdx, last, Sound, 0) // add last tone
+		addTone(startIdx, last, Sound, 0, 0) // add last tone
 	}
 
 	return segments
@@ -438,6 +450,8 @@ type MorseDecoder struct {
 	mSpace  int // space between morse signals (dit/dah)
 	chSpace int // space between characters
 	wSpace  int // space between words
+
+	tmag, smag float64
 }
 
 func NewMorseDecoder(wpm int) *MorseDecoder {
@@ -487,19 +501,24 @@ func (d *MorseDecoder) deCode(code string) string {
 	return fmt.Sprintf("(%s)", d.code)
 }
 
+var minSpeed int = ditTimeMs(5)
+var maxSpeed int = ditTimeMs(50)
+
 func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	var text string
 
-	t50 := ditTimeMs(50)
-
 	dtime := min(ditTimeMs(d.wpm), d.ditTime)
-	if dtime < t50 {
-		dtime = t50
+	if dtime > minSpeed {
+		dtime = minSpeed
+	} else if dtime < maxSpeed {
+		dtime = maxSpeed
 	}
 
 	stime := min(ditTimeMs(d.wpm), d.chSpace)
-	if stime < t50 {
-		stime = t50
+	if stime > minSpeed {
+		stime = minSpeed
+	} else if stime < maxSpeed {
+		stime = maxSpeed
 	}
 
 	for _, seg := range segments {
@@ -520,6 +539,8 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 			} else if durMs > stime/2 { // 1
 				d.mSpace = (d.mSpace + durMs) / 2
 			}
+
+			d.smag = (d.smag + seg.Magnitude) / 2
 		case Sound:
 			if durMs > 2*dtime { // 3
 				// Dah - exponential moving average
@@ -532,6 +553,8 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 				d.code += "."
 			}
+
+			d.tmag = (d.tmag + seg.Magnitude) / 2
 		}
 	}
 
@@ -723,9 +746,6 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		r.StreamBuffer.Data = r.StreamBuffer.Data[:]
 
 		if err := r.Stream.Read(); err != nil {
-			if len(r.StreamBuffer.Data) > 0 {
-				log.Println("stream read: %v (%v)\n", err, len(r.StreamBuffer.Data))
-			}
 			return nil, 0, err
 		}
 
@@ -764,14 +784,14 @@ type App struct {
 
 	startTime time.Time
 
-	reader *AudioReader
-	mode *MorseDecoder
+	reader    *AudioReader
+	mode      *MorseDecoder
 	threshold int
 	sep       bool
 
 	duration int
-	tone int
-	mag int
+	tone     int
+	mag      int
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -804,15 +824,15 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		}
 
 		app.vcmd.Title = "Available commands"
-		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  w: -wpm        W: +wpm         s: toggle separator\n")
-		fmt.Fprintf(app.vcmd, "c: clear             t: -threshold  T: +threshold")
+		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  w: -wpm  t: -threshold   s: toggle separator\n")
+		fmt.Fprintf(app.vcmd, "c: clear             W: +wpm  T: +threshold")
 	}
 
 	d := time.Since(app.startTime)
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 	fmt.Fprintf(app.vinfo,
-	"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Freq: %3d Level: %3d",
+		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Freq: %3d Level: %3d (T: %3d S: %3d)",
 		d.Truncate(time.Second).String(),
 		app.mode.wpm,
 		1200/app.mode.ditTime,
@@ -821,6 +841,8 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		app.threshold,
 		app.tone,
 		app.mag,
+		int(app.mode.tmag*100),
+		int(app.mode.smag*100),
 	)
 
 	return nil
@@ -1122,7 +1144,7 @@ func main() {
 
 		defer f.Close()
 
-		reader, err = FromWaveFile(f, *ssize)
+		reader, err = FromWaveFile(f, 1) // *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
