@@ -498,6 +498,7 @@ func (d *MorseDecoder) deCode(code string) string {
 	if val, ok := morseCode[code]; ok {
 		return val
 	}
+
 	return fmt.Sprintf("(%s)", d.code)
 }
 
@@ -560,82 +561,6 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 	return text
 }
-
-func (d *MorseDecoder) DecodeDebug(segments []ToneSegment) string {
-	var text string
-
-	dtime := min(ditTimeMs(d.wpm), d.ditTime)
-	stime := min(ditTimeMs(d.wpm), d.chSpace)
-
-	fmt.Printf("  [WPM=%d, ditTime=%vms avg.wpm: %v]\n", d.wpm, dtime, 1200/d.ditTime)
-
-	for _, seg := range segments {
-		durMs := int(seg.Duration * 1000) // Convert to milliseconds
-
-		switch seg.Type {
-		case Silence:
-			if durMs > 4*stime { // 7
-				d.wSpace = (d.wSpace + durMs) / 2
-
-				fmt.Printf("S(%vms>%vms) -> decode '%s' word | ", durMs, 4*dtime, d.code)
-				text += d.deCode(d.code) + " "
-				d.code = ""
-			} else if durMs > 2*stime { // 3
-				d.chSpace = (d.chSpace + durMs) / 2
-
-				fmt.Printf("s(%vms>%.0fms) -> decode '%s' | ", durMs, 2*dtime, d.code)
-				text += d.deCode(d.code)
-				d.code = ""
-			} else if durMs > stime/2 { // 1
-				d.mSpace = (d.mSpace + durMs) / 2
-				fmt.Printf("m(%vms) -> signal space | ", durMs)
-			}
-		case Sound:
-			if durMs > 2*dtime { // 3
-				d.dahTime = (d.dahTime + durMs) / 2
-
-				fmt.Printf("T(%vms>%vms) -> dash | ", durMs, 2*dtime)
-				d.code += "-"
-			} else if durMs > dtime/2 { // 1
-				d.ditTime = (d.ditTime + durMs) / 2
-
-				fmt.Printf("T(%vms>%vms) -> dot | ", durMs, dtime/2)
-				d.code += "."
-			}
-		}
-	}
-	fmt.Printf("code so far: '%s'\n", d.code)
-	return text
-}
-
-/*
-func BufferSplit(buf *audio.FloatBuffer, index int) *audio.FloatBuffer {
-	newB := &audio.FloatBuffer{}
-	newB.Data = make([]float64, len(buf.Data[index:]))
-	copy(newB.Data, buf.Data[index:])
-	newB.Format = &audio.Format{
-		NumChannels: buf.Format.NumChannels,
-		SampleRate:  buf.Format.SampleRate,
-	}
-	return newB
-}
-
-func BufferJoin(b1, b2 *audio.FloatBuffer) *audio.FloatBuffer {
-	if b1 == nil {
-		return b2
-	}
-
-	newB := &audio.FloatBuffer{}
-	newB.Data = make([]float64, len(b1.Data)+len(b2.Data))
-	copy(newB.Data, b1.Data)
-	copy(newB.Data[len(b1.Data):], b2.Data)
-	newB.Format = &audio.Format{
-		NumChannels: b1.Format.NumChannels,
-		SampleRate:  b1.Format.SampleRate,
-	}
-	return newB
-}
-*/
 
 func listAudioDevices() ([]string, error) {
 	devices, err := portaudio.Devices()
@@ -841,8 +766,8 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		app.threshold,
 		app.tone,
 		app.mag,
-		int(app.mode.tmag*100),
-		int(app.mode.smag*100),
+		int(app.mode.tmag*1000),
+		int(app.mode.smag*1000),
 	)
 
 	return nil
