@@ -312,7 +312,7 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq, bandwidth float64, debug bool) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth float64, debug bool) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope with window size appropriate for the sample rate
@@ -356,7 +356,7 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 	// Use hysteresis: higher threshold to start, lower to continue
 	startThreshold := threshold
 	endThreshold := threshold * 0.8
-	minDuration := 0.01
+	minDuration := ditTime(wpm) / 5 // minimum duration to consider a valid tone. Under this is likely noise
 
 	addTone := func(start, end int, ttype ToneType, mag, minDur float64) bool {
 		if start < 0 || end <= start {
@@ -465,7 +465,7 @@ func ditTime(wpm int) float64 {
 	if wpm <= 0 {
 		wpm = 25 // default WPM
 	}
-	return float64(1200/wpm) / 1000 // in seconds
+	return 1.2 / float64(wpm) // in seconds
 }
 
 func ditTimeMs(wpm int) int {
@@ -954,7 +954,7 @@ func (app *App) MainLoop() {
 		DenoiseMorse(floatBuf, lowCutoff, highCutoff)
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, thresholdRatio, centerFreq, app.bandwidth, false)
+		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, false)
 
 		/* if *debug {
 			fmt.Println("segments:", toneSegments, "prev:", String(prevTone))
