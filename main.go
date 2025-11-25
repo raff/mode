@@ -217,21 +217,6 @@ func DetectDominantFrequency(data []float64, sampleRate int, minFreq, maxFreq fl
 	return peakFrequency, 2 * peakMagnitude / hammingSum
 }
 
-// DetectMorseToneFrequency specifically detects Morse code tone frequency
-func DetectMorseToneFrequency(buf *audio.FloatBuffer) (centerFreq float64, bandwidth, magnitude float64) {
-	// Typical Morse code frequencies are between 300 Hz and 2000 Hz
-	// Most common around 600-800 Hz
-	minFreq := 300.0
-	maxFreq := 2000.0
-
-	freq, magnitude := DetectDominantFrequency(buf.Data, buf.Format.SampleRate, minFreq, maxFreq)
-
-	// Set bandwidth based on detected frequency
-	// For Morse code, a bandwidth of 200-400 Hz is typically good
-	bandwidth = 300.0
-	return freq, bandwidth, magnitude
-}
-
 type ToneType int
 
 const (
@@ -327,7 +312,7 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq, bandwidth float64, debug bool) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth float64, debug bool) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope with window size appropriate for the sample rate
@@ -371,7 +356,7 @@ func DetectMorseTones(buf *audio.FloatBuffer, thresholdRatio float64, centerFreq
 	// Use hysteresis: higher threshold to start, lower to continue
 	startThreshold := threshold
 	endThreshold := threshold * 0.8
-	minDuration := 0.01
+	minDuration := ditTime(wpm) / 5 // minimum duration to consider a valid tone. Under this is likely noise
 
 	addTone := func(start, end int, ttype ToneType, mag, minDur float64) bool {
 		if start < 0 || end <= start {
@@ -480,7 +465,7 @@ func ditTime(wpm int) float64 {
 	if wpm <= 0 {
 		wpm = 25 // default WPM
 	}
-	return float64(1200/wpm) / 1000 // in seconds
+	return 1.2 / float64(wpm) // in seconds
 }
 
 func ditTimeMs(wpm int) int {
@@ -713,6 +698,7 @@ type App struct {
 	mode      *MorseDecoder
 	threshold int
 	sep       bool
+	bandwidth float64 // frequency bandwidth for bandpass filter
 
 	duration int
 	tone     int
@@ -749,21 +735,22 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		}
 
 		app.vcmd.Title = "Available commands"
-		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  w: -wpm  t: -threshold   s: toggle separator\n")
-		fmt.Fprintf(app.vcmd, "c: clear             W: +wpm  T: +threshold")
+		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  b: -bandwidth w: -wpm  t: -threshold   s: toggle separator\n")
+		fmt.Fprintf(app.vcmd, "c: clear             B: +bandwidth W: +wpm  T: +threshold")
 	}
 
 	d := time.Since(app.startTime)
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 	fmt.Fprintf(app.vinfo,
-		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Freq: %3d Level: %3d (T: %3d S: %3d)",
+		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Bandwidth: %3d Freq: %3d Level: %3d (T: %3d S: %3d)",
 		d.Truncate(time.Second).String(),
 		app.mode.wpm,
 		1200/app.mode.ditTime,
 		app.mode.ditTime,
 		app.mode.mSpace,
 		app.threshold,
+		int(app.bandwidth),
 		app.tone,
 		int(app.mag*1000),
 		int(app.mode.tmag*1000),
@@ -813,6 +800,34 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	if err := app.gui.SetKeybinding("", 's', gocui.ModNone, toggleSep); err != nil {
+		return err
+	}
+
+	//
+	// bandwidth up/down: B / b
+	//
+
+	bandwidthUp := func(g *gocui.Gui, v *gocui.View) error {
+		if app.bandwidth < 500 {
+			app.bandwidth += 50
+		}
+
+		return nil
+	}
+
+	bandwidthDown := func(g *gocui.Gui, v *gocui.View) error {
+		if app.bandwidth > 50 {
+			app.bandwidth -= 50
+		}
+
+		return nil
+	}
+
+	if err := app.gui.SetKeybinding("", 'B', gocui.ModNone, bandwidthUp); err != nil {
+		return err
+	}
+
+	if err := app.gui.SetKeybinding("", 'b', gocui.ModNone, bandwidthDown); err != nil {
 		return err
 	}
 
@@ -918,14 +933,14 @@ func (app *App) MainLoop() {
 		app.duration += int(d * 1000)
 
 		// Automatically detect the Morse code tone frequency
-		centerFreq, bandwidth, magnitude := DetectMorseToneFrequency(floatBuf)
+		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, 300, 2000)
 
 		app.tone = int(centerFreq)
 		app.mag = magnitude
 
 		// Calculate low and high cutoff frequencies
-		lowCutoff := centerFreq - bandwidth/2
-		highCutoff := centerFreq + bandwidth/2
+		lowCutoff := centerFreq - app.bandwidth/2
+		highCutoff := centerFreq + app.bandwidth/2
 
 		// Ensure reasonable bounds
 		if lowCutoff < 300 {
@@ -939,7 +954,7 @@ func (app *App) MainLoop() {
 		DenoiseMorse(floatBuf, lowCutoff, highCutoff)
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, thresholdRatio, centerFreq, bandwidth, false)
+		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, false)
 
 		/* if *debug {
 			fmt.Println("segments:", toneSegments, "prev:", String(prevTone))
@@ -1009,6 +1024,7 @@ func main() {
 	//debug := flag.Bool("debug", false, "debug messages")
 	wpm := flag.Int("wpm", 20, "words per minute (for timing)")
 	dev := flag.String("device", "", "input audio device (for live decoding)")
+	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	threshold := flag.Int("threshold", 50, "Threshold ration (percentage)")
 	flag.Parse()
 
@@ -1083,7 +1099,7 @@ func main() {
 	}
 	defer g.Close()
 
-	app := App{gui: g, startTime: time.Now(), threshold: *threshold, reader: reader, mode: NewMorseDecoder(*wpm)}
+	app := App{gui: g, startTime: time.Now(), bandwidth: *bandwidth, threshold: *threshold, reader: reader, mode: NewMorseDecoder(*wpm)}
 
 	g.SetManagerFunc(app.Layout)
 
