@@ -716,7 +716,7 @@ type App struct {
 
 	duration int
 	tone     int
-	mag      int
+	mag      float64
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -765,7 +765,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		app.mode.mSpace,
 		app.threshold,
 		app.tone,
-		app.mag,
+		int(app.mag*1000),
 		int(app.mode.tmag*1000),
 		int(app.mode.smag*1000),
 	)
@@ -921,7 +921,7 @@ func (app *App) MainLoop() {
 		centerFreq, bandwidth, magnitude := DetectMorseToneFrequency(floatBuf)
 
 		app.tone = int(centerFreq)
-		app.mag = int(magnitude)
+		app.mag = magnitude
 
 		// Calculate low and high cutoff frequencies
 		lowCutoff := centerFreq - bandwidth/2
