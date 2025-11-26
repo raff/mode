@@ -37,9 +37,9 @@ var morseCode = map[string]string{
 	"--...": "7", "---..": "8", "----.": "9", "-----": "0",
 
 	// punctuations
-	".-..-.": "\"", "...-..-": "$", ".----.": "'", /*"-.--.": "[",*/ "-.--.-": "]",
+	".-..-.": "\"", "...-..-": "$", ".----.": "'" /*"-.--.": "[",*/, "-.--.-": "]",
 	/*".-.-.": "+",*/ "--..--": ",", "-....-": "-", ".-.-.-": ".", ".-.-.-.": ".",
-	"-..-.": "/", "---...": ":", "-.-.-.": ";", /*"-...-": "=",*/ "..--..": "?",
+	"-..-.": "/", "---...": ":", "-.-.-.": ";" /*"-...-": "=",*/, "..--..": "?",
 	".--.-.": "@", "..--.-": "_", "-.-.--": "!", "---.": "!",
 
 	// prosigns
@@ -574,14 +574,95 @@ func listAudioDevices() ([]string, error) {
 	return list, nil
 }
 
+type AudioWriter struct {
+	Stream       *portaudio.Stream
+	StreamBuffer audio.Float32Buffer
+	mute         bool
+}
+
+func NewAudioWriter(dev string, sampleRate, ssize int) (*AudioWriter, error) {
+	devices, err := portaudio.Devices()
+	if err != nil {
+		return nil, err
+	}
+
+	var info *portaudio.DeviceInfo
+
+	i, err := strconv.Atoi(dev)
+	if err == nil && i > 0 && i <= len(devices) {
+		info = devices[i-1]
+	}
+
+	if info == nil {
+		for _, d := range devices {
+			if info == nil && strings.HasPrefix(d.Name, dev) {
+				info = d
+			}
+
+		}
+	}
+
+	if info == nil {
+		return nil, fmt.Errorf("device not found: %s", dev)
+	}
+
+	var stream *portaudio.Stream
+
+	const numChannels = 1
+
+	p := portaudio.HighLatencyParameters(nil, info)
+	p.Input.Channels = 0
+	p.Output.Channels = numChannels
+	p.SampleRate = float64(sampleRate)
+	p.FramesPerBuffer = sampleRate / ssize
+
+	buf32 := audio.Float32Buffer{Format: &audio.Format{NumChannels: numChannels, SampleRate: sampleRate}, Data: make([]float32, p.FramesPerBuffer)}
+
+	stream, err = portaudio.OpenStream(p, buf32.Data)
+	if err != nil {
+		return nil, fmt.Errorf("open output: %w", err)
+	}
+
+	if err := stream.Start(); err != nil {
+		return nil, fmt.Errorf("start output: %w", err)
+	}
+
+	return &AudioWriter{
+		Stream:       stream,
+		StreamBuffer: buf32,
+	}, nil
+}
+
+func (w *AudioWriter) Close() {
+	if w.Stream != nil {
+		w.Stream.Stop()
+	}
+}
+
+func (w *AudioWriter) Mute(m bool) {
+	if w.mute = m; w.mute {
+		for i := range w.StreamBuffer.Data {
+			w.StreamBuffer.Data[i] = 0
+		}
+	}
+}
+
+func (w *AudioWriter) Write(b *audio.FloatBuffer) error {
+	if w.mute {
+		return nil
+	}
+
+	buf32 := b.AsFloat32Buffer()
+	copy(w.StreamBuffer.Data, buf32.Data)
+	return w.Stream.Write()
+}
+
 type AudioReader struct {
 	Stream       *portaudio.Stream
 	StreamBuffer audio.Float32Buffer
 
 	WavDecoder *wav.Decoder
 	WavBuffer  audio.IntBuffer
-
-	OutStream *portaudio.Stream
 
 	SampleRate int
 	Channels   int
@@ -603,33 +684,24 @@ func FromWaveFile(r io.ReadSeeker, ssize int) (*AudioReader, error) {
 	}, nil
 }
 
-func FromAudioStream(dev, outdev string, ssize int) (*AudioReader, error) {
+func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
 		return nil, err
 	}
 
-	var info, outinfo *portaudio.DeviceInfo
+	var info *portaudio.DeviceInfo
 
 	i, err := strconv.Atoi(dev)
 	if err == nil && i > 0 && i <= len(devices) {
 		info = devices[i-1]
 	}
-	if outdev != "" {
-		i, err = strconv.Atoi(outdev)
-		if err == nil && i > 0 && i <= len(devices) {
-			outinfo = devices[i-1]
-		}
-	}
 
-	if info == nil || (outdev != "" && outinfo == nil) {
+	if info == nil {
 		for _, d := range devices {
 			if info == nil && strings.HasPrefix(d.Name, dev) {
 				info = d
-			}
-
-			if outdev != "" && outinfo == nil && strings.HasPrefix(d.Name, outdev) {
-				outinfo = d
+				break
 			}
 		}
 	}
@@ -638,7 +710,7 @@ func FromAudioStream(dev, outdev string, ssize int) (*AudioReader, error) {
 		return nil, fmt.Errorf("device not found: %s", dev)
 	}
 
-	var numChannels = 1 // info.MaxInputChannels
+	const numChannels = 1
 	const sampleRate = 44100
 
 	p := portaudio.HighLatencyParameters(info, nil)
@@ -658,32 +730,9 @@ func FromAudioStream(dev, outdev string, ssize int) (*AudioReader, error) {
 		return nil, fmt.Errorf("start input: %w", err)
 	}
 
-	var ostream *portaudio.Stream
-
-	if outinfo != nil {
-		p := portaudio.HighLatencyParameters(nil, outinfo)
-		p.Input.Channels = 0
-		p.Output.Channels = numChannels
-		p.SampleRate = sampleRate
-		p.FramesPerBuffer = sampleRate / ssize
-
-		ostream, err = portaudio.OpenStream(p, buf32.Data)
-		if err != nil {
-			stream.Stop()
-			log.Println("output:", p)
-			return nil, fmt.Errorf("open output: %w", err)
-		}
-
-		if err := ostream.Start(); err != nil {
-			stream.Stop()
-			return nil, fmt.Errorf("start output: %w", err)
-		}
-	}
-
 	return &AudioReader{
 		Stream:       stream,
 		StreamBuffer: buf32,
-		OutStream:    ostream,
 		SampleRate:   sampleRate,
 		Channels:     numChannels,
 		SampleSize:   ssize,
@@ -697,9 +746,6 @@ func (r *AudioReader) Close() {
 	if r.WavDecoder != nil {
 		// nothing to close
 	}
-	if r.OutStream != nil {
-		r.OutStream.Stop()
-	}
 }
 
 func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
@@ -711,23 +757,10 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 			return nil, 0, err
 		}
 
-		if r.OutStream != nil {
-			/*
-				l, err := r.OutStream.AvailableToWrite()
-				if err != nil || l < len(r.StreamBuffer.Data) {
-					log.Println("Warning: output stream not available for writing:", err, l)
-
-				}
-			*/
-
-			// Playback input audio (for monitoring)
-			if err := r.OutStream.Write(); err != nil {
-				//log.Println("Warning: failed to write to output stream:", err)
-			}
-		}
-
 		// Convert to FloatBuffer
-		return r.StreamBuffer.AsFloatBuffer(), len(r.StreamBuffer.Data), nil
+		fb := r.StreamBuffer.AsFloatBuffer()
+		transforms.NormalizeMax(fb)
+		return fb, len(r.StreamBuffer.Data), nil
 	}
 
 	if r.WavDecoder != nil {
@@ -747,7 +780,10 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		r.WavBuffer.Data = r.WavBuffer.Data[:n]
 
 		// Convert to FloatBuffer
-		return r.WavBuffer.AsFloatBuffer(), n, nil
+		fb := r.WavBuffer.AsFloatBuffer()
+		transforms.NormalizeMax(fb)
+
+		return fb, n, nil
 	}
 
 	return nil, 0, fmt.Errorf("no audio source available")
@@ -762,9 +798,11 @@ type App struct {
 	startTime time.Time
 
 	reader    *AudioReader
+	player    *AudioWriter
 	mode      *MorseDecoder
 	threshold int
 	sep       bool
+	mute      bool
 	bandwidth float64 // frequency bandwidth for bandpass filter
 
 	duration int
@@ -804,6 +842,10 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		app.vcmd.Title = "Available commands"
 		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  b: -bandwidth w: -wpm  t: -threshold   s: toggle separator\n")
 		fmt.Fprintf(app.vcmd, "c: clear             B: +bandwidth W: +wpm  T: +threshold")
+
+		if app.player != nil {
+			fmt.Fprintf(app.vcmd, "   m: toggle audio/mute")
+		}
 	}
 
 	d := time.Since(app.startTime)
@@ -867,6 +909,22 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	if err := app.gui.SetKeybinding("", 's', gocui.ModNone, toggleSep); err != nil {
+		return err
+	}
+
+	//
+	// toggle mute: m
+	//
+
+	toggleMute := func(g *gocui.Gui, v *gocui.View) error {
+		app.mute = !app.mute
+		if app.player != nil {
+			app.player.Mute(app.mute)
+		}
+		return nil
+	}
+
+	if err := app.gui.SetKeybinding("", 'm', gocui.ModNone, toggleMute); err != nil {
 		return err
 	}
 
@@ -1020,6 +1078,10 @@ func (app *App) MainLoop() {
 		// Apply bandpass filter centered on detected frequency
 		DenoiseMorse(floatBuf, lowCutoff, highCutoff)
 
+		if app.player != nil {
+			app.player.Write(floatBuf)
+		}
+
 		// Detect Morse code tone segments (beginning and end of each tone)
 		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, false)
 
@@ -1103,7 +1165,7 @@ func main() {
 		*threshold = 100
 	}
 
-	if *dev != "" || flag.NArg() == 0 {
+	if *dev != "" || *out != "" || flag.NArg() == 0 {
 		// Initialize PortAudio
 		err := portaudio.Initialize()
 		if err != nil {
@@ -1147,10 +1209,11 @@ func main() {
 	}
 
 	var reader *AudioReader
+	var player *AudioWriter
 	var err error
 
 	if *dev != "" {
-		reader, err = FromAudioStream(*dev, *out, *ssize)
+		reader, err = FromAudioStream(*dev, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1172,13 +1235,28 @@ func main() {
 		log.Fatal("no input source specified")
 	}
 
+	if *out != "" {
+		player, err = NewAudioWriter(*out, reader.SampleRate, *ssize)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
 
-	app := App{gui: g, startTime: time.Now(), bandwidth: *bandwidth, threshold: *threshold, reader: reader, mode: NewMorseDecoder(*wpm)}
+	app := App{
+		gui:       g,
+		startTime: time.Now(),
+		bandwidth: *bandwidth,
+		threshold: *threshold,
+		reader:    reader,
+		player:    player,
+		mode:      NewMorseDecoder(*wpm),
+	}
 
 	g.SetManagerFunc(app.Layout)
 
