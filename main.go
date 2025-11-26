@@ -559,7 +559,16 @@ func listAudioDevices() ([]string, error) {
 	var list []string
 
 	for _, d := range devices {
-		list = append(list, d.Name)
+		v := d.Name
+
+		if d.MaxInputChannels > 0 {
+			v += fmt.Sprintf(" (in:%v)", d.MaxInputChannels)
+		}
+		if d.MaxOutputChannels > 0 {
+			v += fmt.Sprintf(" (out:%v)", d.MaxOutputChannels)
+		}
+
+		list = append(list, v)
 	}
 
 	return list, nil
@@ -571,6 +580,8 @@ type AudioReader struct {
 
 	WavDecoder *wav.Decoder
 	WavBuffer  audio.IntBuffer
+
+	OutStream *portaudio.Stream
 
 	SampleRate int
 	Channels   int
@@ -592,21 +603,33 @@ func FromWaveFile(r io.ReadSeeker, ssize int) (*AudioReader, error) {
 	}, nil
 }
 
-func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
+func FromAudioStream(dev, outdev string, ssize int) (*AudioReader, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
 		return nil, err
 	}
 
-	var info *portaudio.DeviceInfo
+	var info, outinfo *portaudio.DeviceInfo
 
 	i, err := strconv.Atoi(dev)
 	if err == nil && i > 0 && i <= len(devices) {
 		info = devices[i-1]
-	} else {
+	}
+	if outdev != "" {
+		i, err = strconv.Atoi(outdev)
+		if err == nil && i > 0 && i <= len(devices) {
+			outinfo = devices[i-1]
+		}
+	}
+
+	if info == nil || (outdev != "" && outinfo == nil) {
 		for _, d := range devices {
-			if strings.HasPrefix(d.Name, dev) {
+			if info == nil && strings.HasPrefix(d.Name, dev) {
 				info = d
+			}
+
+			if outdev != "" && outinfo == nil && strings.HasPrefix(d.Name, outdev) {
+				outinfo = d
 			}
 		}
 	}
@@ -615,7 +638,7 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 		return nil, fmt.Errorf("device not found: %s", dev)
 	}
 
-	const numChannels = 1
+	var numChannels = 1 // info.MaxInputChannels
 	const sampleRate = 44100
 
 	p := portaudio.HighLatencyParameters(info, nil)
@@ -628,16 +651,39 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 
 	stream, err := portaudio.OpenStream(p, buf32.Data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open input: %w", err)
 	}
 
 	if err := stream.Start(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("start input: %w", err)
+	}
+
+	var ostream *portaudio.Stream
+
+	if outinfo != nil {
+		p := portaudio.HighLatencyParameters(nil, outinfo)
+		p.Input.Channels = 0
+		p.Output.Channels = numChannels
+		p.SampleRate = sampleRate
+		p.FramesPerBuffer = sampleRate / ssize
+
+		ostream, err = portaudio.OpenStream(p, buf32.Data)
+		if err != nil {
+			stream.Stop()
+			log.Println("output:", p)
+			return nil, fmt.Errorf("open output: %w", err)
+		}
+
+		if err := ostream.Start(); err != nil {
+			stream.Stop()
+			return nil, fmt.Errorf("start output: %w", err)
+		}
 	}
 
 	return &AudioReader{
 		Stream:       stream,
 		StreamBuffer: buf32,
+		OutStream:    ostream,
 		SampleRate:   sampleRate,
 		Channels:     numChannels,
 		SampleSize:   ssize,
@@ -651,6 +697,9 @@ func (r *AudioReader) Close() {
 	if r.WavDecoder != nil {
 		// nothing to close
 	}
+	if r.OutStream != nil {
+		r.OutStream.Stop()
+	}
 }
 
 func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
@@ -660,6 +709,21 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 
 		if err := r.Stream.Read(); err != nil {
 			return nil, 0, err
+		}
+
+		if r.OutStream != nil {
+			/*
+				l, err := r.OutStream.AvailableToWrite()
+				if err != nil || l < len(r.StreamBuffer.Data) {
+					log.Println("Warning: output stream not available for writing:", err, l)
+
+				}
+			*/
+
+			// Playback input audio (for monitoring)
+			if err := r.OutStream.Write(); err != nil {
+				//log.Println("Warning: failed to write to output stream:", err)
+			}
 		}
 
 		// Convert to FloatBuffer
@@ -746,7 +810,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 	fmt.Fprintf(app.vinfo,
-		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Bandwidth: %3d Freq: %3d Level: %3d (T: %3d S: %3d)",
+		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)",
 		d.Truncate(time.Second).String(),
 		app.mode.wpm,
 		1200/app.mode.ditTime,
@@ -1027,6 +1091,7 @@ func main() {
 	//debug := flag.Bool("debug", false, "debug messages")
 	wpm := flag.Int("wpm", 20, "words per minute (for timing)")
 	dev := flag.String("device", "", "input audio device (for live decoding)")
+	out := flag.String("play", "", "output audio device (for monitoring)")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	threshold := flag.Int("threshold", 50, "Threshold ration (percentage)")
 	flag.Parse()
@@ -1062,6 +1127,17 @@ func main() {
 		for i, d := range l {
 			fmt.Println("", i+1, d)
 		}
+
+		din, _ := portaudio.DefaultInputDevice()
+		dout, _ := portaudio.DefaultOutputDevice()
+
+		fmt.Println()
+		if din != nil {
+			fmt.Println("Default input device:", din.Name)
+		}
+		if dout != nil {
+			fmt.Println("Default output device:", dout.Name)
+		}
 		return
 	}
 
@@ -1074,7 +1150,7 @@ func main() {
 	var err error
 
 	if *dev != "" {
-		reader, err = FromAudioStream(*dev, *ssize)
+		reader, err = FromAudioStream(*dev, *out, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
