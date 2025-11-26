@@ -37,15 +37,13 @@ var morseCode = map[string]string{
 	"--...": "7", "---..": "8", "----.": "9", "-----": "0",
 
 	// punctuations
-	".-..-.": "\"", "...-..-": "$", ".----.": "'", "-.--.": "[", "-.--.-": "]",
-	".-.-.": "+", "--..--": ",", "-....-": "-", ".-.-.-": ".", ".-.-.-.": ".",
-	"-..-.": "/", "---...": ":", "-.-.-.": ";", "-...-": "=", "..--..": "?",
+	".-..-.": "\"", "...-..-": "$", ".----.": "'", /*"-.--.": "[",*/ "-.--.-": "]",
+	/*".-.-.": "+",*/ "--..--": ",", "-....-": "-", ".-.-.-": ".", ".-.-.-.": ".",
+	"-..-.": "/", "---...": ":", "-.-.-.": ";", /*"-...-": "=",*/ "..--..": "?",
 	".--.-.": "@", "..--.-": "_", "-.-.--": "!", "---.": "!",
 
-	// abbreviations
-	/*
-		".-.-.": "<AR>", ".-...": "<AS>", "-...-.-": "<BK>", "...-.-": "<SK>", "-...-": "<BT>", "-.--.": "<KN>",
-	*/
+	// prosigns
+	".-.-.": "<AR/+>", ".-...": "<AS>", "-...-.-": "<BK>", "...-.-": "<SK>", "-...-": "<BT/=>", "-.--.": "<KN/[>",
 }
 
 // Biquad filter struct, for bandpass filtering
@@ -493,19 +491,24 @@ var maxSpeed int = ditTimeMs(50)
 func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	var text string
 
-	dtime := min(ditTimeMs(d.wpm), d.ditTime)
-	if dtime > minSpeed {
-		dtime = minSpeed
-	} else if dtime < maxSpeed {
-		dtime = maxSpeed
-	}
+	/*
+		dtime := min(ditTimeMs(d.wpm), d.ditTime)
+		if dtime > minSpeed {
+			dtime = minSpeed
+		} else if dtime < maxSpeed {
+			dtime = maxSpeed
+		}
 
-	stime := min(ditTimeMs(d.wpm), d.chSpace)
-	if stime > minSpeed {
-		stime = minSpeed
-	} else if stime < maxSpeed {
-		stime = maxSpeed
-	}
+		stime := min(ditTimeMs(d.wpm), d.chSpace)
+		if stime > minSpeed {
+			stime = minSpeed
+		} else if stime < maxSpeed {
+			stime = maxSpeed
+		}
+	*/
+
+	dtime := ditTimeMs(d.wpm)
+	stime := ditTimeMs(d.wpm)
 
 	for _, seg := range segments {
 		durMs := int(seg.Duration * 1000) // Convert to milliseconds
