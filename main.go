@@ -1162,6 +1162,11 @@ func (app *App) SetKeyBinding() error {
 }
 
 func (app *App) Print(s string) {
+	if app.gui == nil {
+		fmt.Print(s)
+		return
+	}
+
 	app.gui.Update(func(g *gocui.Gui) error {
 		fmt.Fprint(app.vmain, s)
 		return nil
@@ -1296,8 +1301,11 @@ func main() {
 	dev := flag.String("device", "", "input audio device (for live decoding)")
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
-	threshold := flag.Int("threshold", 50, "Threshold ratio (percentage)")
 	noiseGate := flag.Float64("noisegate", 0.01, "Noise gate (squelch) level (0.0-1.0)")
+	threshold := flag.Int("threshold", 70, "Ratio (%) between min and max signal level to be considered a valid tone")
+	noui := flag.Bool("noui", false, "no user interface, write to stdout")
+	sep := flag.Bool("separator", false, "output separator '_' between decoded segments")
+
 	flag.Parse()
 
 	if *threshold < 1 {
@@ -1384,11 +1392,15 @@ func main() {
 		}
 	}
 
-	g, err := gocui.NewGui(gocui.OutputNormal)
-	if err != nil {
-		log.Panicln(err)
+	var g *gocui.Gui
+
+	if *noui == false {
+		g, err = gocui.NewGui(gocui.OutputNormal)
+		if err != nil {
+			log.Panicln(err)
+		}
+		defer g.Close()
 	}
-	defer g.Close()
 
 	app := App{
 		gui:       g,
@@ -1396,18 +1408,24 @@ func main() {
 		bandwidth: *bandwidth,
 		threshold: *threshold,
 		noiseGate: *noiseGate,
+		sep:       *sep,
 		reader:    reader,
 		player:    player,
 		mode:      NewMorseDecoder(*wpm),
 	}
 
-	g.SetManagerFunc(app.Layout)
+	if g != nil {
+		g.SetManagerFunc(app.Layout)
+		app.SetKeyBinding()
 
-	app.SetKeyBinding()
+		go app.MainLoop()
 
-	go app.MainLoop()
+		if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
+			log.Panicln(err)
+		}
 
-	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
-		log.Panicln(err)
+		return
 	}
+
+	app.MainLoop()
 }
