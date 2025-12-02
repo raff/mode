@@ -1301,8 +1301,8 @@ func main() {
 	dev := flag.String("device", "", "input audio device (for live decoding)")
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
-	noiseGate := flag.Float64("noisegate", 0.01, "Noise gate (squelch) level (0.0-1.0)")
-	threshold := flag.Int("threshold", 70, "Ratio (%) between min and max signal level to be considered a valid tone")
+	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
+	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
 	sep := flag.Bool("separator", false, "output separator '_' between decoded segments")
 
