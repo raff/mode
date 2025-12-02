@@ -20,6 +20,11 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
+const (
+	minToneFreq = 300
+	maxToneFreq = 2000
+)
+
 // Morse code mapping
 var morseCode = map[string]string{
 	// letters
@@ -310,7 +315,7 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth float64, debug bool) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate float64, debug bool) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope with window size appropriate for the sample rate
@@ -340,6 +345,12 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 		if v < minEnv {
 			minEnv = v
 		}
+	}
+
+	// Apply Noise Gate (Squelch)
+	// If the maximum signal is below the noise gate, ignore the entire buffer
+	if maxEnv < noiseGate {
+		return nil
 	}
 
 	// Threshold is a percentage between min and max
@@ -388,19 +399,52 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	last := len(envelope) - 1
 
 	for i, v := range envelope {
+		vm := v * 100 / maxEnv
+
 		if !inTone && v > startThreshold {
 			// Tone begins
-			if i == 0 || addTone(endIdx, i, Silence, v, 0) { // add previous silence
+			added := false
+			if i == 0 {
+				added = true
+			} else {
+				added = addTone(endIdx, i, Silence, vm, minDuration) // add previous silence
+			}
+
+			if added {
 				inTone = true
 				startIdx = i
 				endIdx = -1
+			} else {
+				// Silence was too short (dip in tone) -> ignore it and continue as tone
+				if len(segments) > 0 {
+					last := segments[len(segments)-1]
+					if last.Type == Sound {
+						// Remove the last segment (Sound) so we can extend it
+						segments = segments[:len(segments)-1]
+						inTone = true
+						startIdx = last.StartIdx
+						endIdx = -1
+					}
+				}
 			}
 		} else if inTone && v < endThreshold {
 			// Tone ends
-			if addTone(startIdx, i, Sound, v, minDuration) {
+			if addTone(startIdx, i, Sound, vm, minDuration) {
 				inTone = false
 				endIdx = i
 				startIdx = -1
+			} else {
+				// Sound was too short (spike in silence) -> ignore it and continue as silence
+				if len(segments) > 0 {
+					last := segments[len(segments)-1]
+					if last.Type == Silence {
+						// Remove the last segment (Silence) so we can extend it
+						segments = segments[:len(segments)-1]
+						inTone = false
+						endIdx = last.StartIdx
+						startIdx = -1
+					}
+				}
 			}
 		}
 	}
@@ -414,10 +458,10 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 			segments[l].EndTime += lastd
 			segments[l].Duration += lastd
 		} else if !inTone && endIdx < last {
-			addTone(endIdx, last, Silence, 0, 0) // add last silence
+			addTone(endIdx, last, Silence, 100.0, 0) // add last silence
 		}
 	} else if inTone && startIdx >= 0 {
-		addTone(startIdx, last, Sound, 0, 0) // add last tone
+		addTone(startIdx, last, Sound, 100.0, 0) // add last tone
 	}
 
 	return segments
@@ -435,6 +479,8 @@ type MorseDecoder struct {
 	wSpace  int // space between words
 
 	tmag, smag float64
+
+	cm []byte
 }
 
 func NewMorseDecoder(wpm int) *MorseDecoder {
@@ -482,7 +528,18 @@ func (d *MorseDecoder) deCode(code string) string {
 		return val
 	}
 
-	return fmt.Sprintf("(%s)", d.code)
+	if false {
+		var res string
+
+		for i, c := range code {
+			res += fmt.Sprintf("[%c %v]", c, d.cm[i])
+		}
+
+		return res
+	} else {
+		return "(" + code + ")"
+	}
+
 }
 
 var minSpeed int = ditTimeMs(5)
@@ -520,11 +577,15 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 				text += d.deCode(d.code) + " "
 				d.code = ""
+
+				d.cm = d.cm[:0]
 			} else if durMs > 2*stime { // 3
 				d.chSpace = (d.chSpace + durMs) / 2
 
 				text += d.deCode(d.code)
 				d.code = ""
+
+				d.cm = d.cm[:0]
 			} else if durMs > stime/2 { // 1
 				d.mSpace = (d.mSpace + durMs) / 2
 			}
@@ -536,11 +597,15 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 				d.dahTime = (d.dahTime + durMs) / 2
 
 				d.code += "-"
-			} else if durMs > dtime/2 { // 1
+				d.cm = append(d.cm, byte(seg.Magnitude))
+			} else if durMs > dtime*2/3 { // 1
 				// Dit - exponential moving average
 				d.ditTime = (d.ditTime + durMs) / 2
 
 				d.code += "."
+				d.cm = append(d.cm, byte(seg.Magnitude))
+			} else {
+				//d.code += "?"
 			}
 
 			d.tmag = (d.tmag + seg.Magnitude) / 2
@@ -577,6 +642,7 @@ func listAudioDevices() ([]string, error) {
 type AudioWriter struct {
 	Stream       *portaudio.Stream
 	StreamBuffer audio.Float32Buffer
+	Volume       float32
 	mute         bool
 }
 
@@ -630,6 +696,7 @@ func NewAudioWriter(dev string, sampleRate, ssize int) (*AudioWriter, error) {
 	return &AudioWriter{
 		Stream:       stream,
 		StreamBuffer: buf32,
+		Volume:       1.0,
 	}, nil
 }
 
@@ -653,6 +720,13 @@ func (w *AudioWriter) Write(b *audio.FloatBuffer) error {
 	}
 
 	buf32 := b.AsFloat32Buffer()
+
+	if w.Volume != 1.0 {
+		for i := 0; i < len(buf32.Data); i++ {
+			buf32.Data[i] *= w.Volume
+		}
+	}
+
 	copy(w.StreamBuffer.Data, buf32.Data)
 	return w.Stream.Write()
 }
@@ -802,12 +876,14 @@ type App struct {
 	mode      *MorseDecoder
 	threshold int
 	sep       bool
-	mute      bool
 	bandwidth float64 // frequency bandwidth for bandpass filter
+	noiseGate float64 // minimum amplitude to consider as signal
 
 	duration int
 	tone     int
 	mag      float64
+
+	mute bool
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -840,11 +916,17 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		}
 
 		app.vcmd.Title = "Available commands"
-		fmt.Fprintf(app.vcmd, "Ctrl-C/Ctrl-Q: quit  b: -bandwidth w: -wpm  t: -threshold   s: toggle separator\n")
-		fmt.Fprintf(app.vcmd, "c: clear             B: +bandwidth W: +wpm  T: +threshold")
+		fmt.Fprintf(app.vcmd, "^C/^Q: quit  b: -bandwidth  w: -wpm  n: -noise t: -threshold")
 
 		if app.player != nil {
-			fmt.Fprintf(app.vcmd, "   m: toggle audio/mute")
+			fmt.Fprintf(app.vcmd, "  v: -volume")
+		}
+
+		fmt.Fprintf(app.vcmd, "  s: toggle separator\n")
+		fmt.Fprintf(app.vcmd, "c: clear     B: +bandwidth  W: +wpm  N: +noise T: +threshold")
+
+		if app.player != nil {
+			fmt.Fprintf(app.vcmd, "  V: +volume  m: toggle audio/mute")
 		}
 	}
 
@@ -852,19 +934,25 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 	fmt.Fprintf(app.vinfo,
-		"Elapsed: %8v WPM: %2d (%2d) dit: %3dms space: %3dms  Threshold: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)",
-		d.Truncate(time.Second).String(),
+		"WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
 		app.mode.wpm,
 		1200/app.mode.ditTime,
 		app.mode.ditTime,
 		app.mode.mSpace,
+		app.mode.wSpace,
+		app.noiseGate,
 		app.threshold,
 		int(app.bandwidth),
 		app.tone,
 		int(app.mag*1000),
-		int(app.mode.tmag*1000),
-		int(app.mode.smag*1000),
+		int(app.mode.tmag), // *1000),
+		int(app.mode.smag), // *1000),
+		d.Truncate(time.Second).String(),
 	)
+
+	if app.player != nil {
+		fmt.Fprintf(app.vinfo, " vol: %d", int(app.player.Volume*10))
+	}
 
 	return nil
 }
@@ -909,22 +997,6 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	if err := app.gui.SetKeybinding("", 's', gocui.ModNone, toggleSep); err != nil {
-		return err
-	}
-
-	//
-	// toggle mute: m
-	//
-
-	toggleMute := func(g *gocui.Gui, v *gocui.View) error {
-		app.mute = !app.mute
-		if app.player != nil {
-			app.player.Mute(app.mute)
-		}
-		return nil
-	}
-
-	if err := app.gui.SetKeybinding("", 'm', gocui.ModNone, toggleMute); err != nil {
 		return err
 	}
 
@@ -985,6 +1057,34 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	//
+	// noise gate up/down: N / n
+	//
+
+	noiseUp := func(g *gocui.Gui, v *gocui.View) error {
+		if app.noiseGate < 1 {
+			app.noiseGate += 0.1
+		}
+
+		return nil
+	}
+
+	noiseDown := func(g *gocui.Gui, v *gocui.View) error {
+		if app.noiseGate > 0.1 {
+			app.noiseGate -= 0.1
+		}
+
+		return nil
+	}
+
+	if err := app.gui.SetKeybinding("", 'N', gocui.ModNone, noiseUp); err != nil {
+		return err
+	}
+
+	if err := app.gui.SetKeybinding("", 'n', gocui.ModNone, noiseDown); err != nil {
+		return err
+	}
+
+	//
 	// threshold up/down: T / t
 	//
 
@@ -1012,6 +1112,52 @@ func (app *App) SetKeyBinding() error {
 		return err
 	}
 
+	if app.player != nil {
+
+		//
+		// toggle mute: m
+		//
+
+		toggleMute := func(g *gocui.Gui, v *gocui.View) error {
+			app.mute = !app.mute
+			app.player.Mute(app.mute)
+			return nil
+		}
+
+		if err := app.gui.SetKeybinding("", 'm', gocui.ModNone, toggleMute); err != nil {
+			return err
+		}
+
+		//
+		// volume up/down: V / v
+		//
+
+		volumeUp := func(g *gocui.Gui, v *gocui.View) error {
+			if app.player.Volume < 2.0 {
+				app.player.Volume += 0.1
+			}
+
+			return nil
+		}
+
+		volumeDown := func(g *gocui.Gui, v *gocui.View) error {
+			if app.player.Volume > 0.0 {
+				app.player.Volume -= 0.1
+			}
+
+			return nil
+		}
+
+		if err := app.gui.SetKeybinding("", 'V', gocui.ModNone, volumeUp); err != nil {
+			return err
+		}
+
+		if err := app.gui.SetKeybinding("", 'v', gocui.ModNone, volumeDown); err != nil {
+			return err
+		}
+
+	}
+
 	return nil
 }
 
@@ -1025,14 +1171,6 @@ func (app *App) Print(s string) {
 func (app *App) MainLoop() {
 	var toneSegments []ToneSegment
 	var prevTone *ToneSegment
-
-	/*
-		fmt.Println("Decoding Morse code")
-		fmt.Printf("Input sample rate: %vhz, %v channels, buffer: %.0fms\n",
-			reader.SampleRate, reader.Channels, 1000.0/float64(*ssize))
-		fmt.Println("WPM:", *wpm)
-		fmt.Println()
-	*/
 
 	// Threshold ratio: 0.3 means 30% above the minimum envelope value
 	// Adjust this value if detection is too sensitive (lower it) or misses tones (raise it)
@@ -1054,11 +1192,14 @@ func (app *App) MainLoop() {
 		// Convert to mono (in place)
 		transforms.MonoDownmix(floatBuf)
 
+		// denoise ?
+		//DenoiseMorse(floatBuf, minToneFreq, maxToneFreq)
+
 		d := float64(len(floatBuf.Data)) / float64(app.reader.SampleRate)
 		app.duration += int(d * 1000)
 
 		// Automatically detect the Morse code tone frequency
-		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, 300, 2000)
+		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, minToneFreq, maxToneFreq)
 
 		app.tone = int(centerFreq)
 		app.mag = magnitude
@@ -1068,11 +1209,11 @@ func (app *App) MainLoop() {
 		highCutoff := centerFreq + app.bandwidth/2
 
 		// Ensure reasonable bounds
-		if lowCutoff < 300 {
-			lowCutoff = 300
+		if lowCutoff < minToneFreq {
+			lowCutoff = minToneFreq
 		}
-		if highCutoff > 2000 {
-			highCutoff = 2000
+		if highCutoff > maxToneFreq {
+			highCutoff = maxToneFreq
 		}
 
 		// Apply bandpass filter centered on detected frequency
@@ -1083,7 +1224,7 @@ func (app *App) MainLoop() {
 		}
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, false)
+		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, app.noiseGate, false)
 
 		/* if *debug {
 			fmt.Println("segments:", toneSegments, "prev:", String(prevTone))
@@ -1155,7 +1296,8 @@ func main() {
 	dev := flag.String("device", "", "input audio device (for live decoding)")
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
-	threshold := flag.Int("threshold", 50, "Threshold ration (percentage)")
+	threshold := flag.Int("threshold", 50, "Threshold ratio (percentage)")
+	noiseGate := flag.Float64("noisegate", 0.01, "Noise gate (squelch) level (0.0-1.0)")
 	flag.Parse()
 
 	if *threshold < 1 {
@@ -1253,6 +1395,7 @@ func main() {
 		startTime: time.Now(),
 		bandwidth: *bandwidth,
 		threshold: *threshold,
+		noiseGate: *noiseGate,
 		reader:    reader,
 		player:    player,
 		mode:      NewMorseDecoder(*wpm),
