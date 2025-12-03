@@ -934,6 +934,7 @@ type App struct {
 
 	mute   bool
 	filter AudioFilter
+	fname  string
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -983,8 +984,10 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	d := time.Since(app.startTime)
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
+
 	fmt.Fprintf(app.vinfo,
-		"WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
+		"Filter: %-3s  WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
+		app.fname,
 		app.mode.wpm,
 		1200/app.mode.ditTime,
 		app.mode.ditTime,
@@ -1460,6 +1463,8 @@ func main() {
 		af = Denoise
 	case "apf":
 		af = AudioPeakFilter
+	default:
+		*filter = "no"
 	}
 
 	app := App{
@@ -1475,6 +1480,7 @@ func main() {
 		player:    player,
 		mode:      NewMorseDecoder(*wpm),
 		filter:    af,
+		fname:     *filter,
 	}
 
 	if g != nil {
