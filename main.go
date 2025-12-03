@@ -20,11 +20,6 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
-const (
-	minToneFreq = 300
-	maxToneFreq = 2000
-)
-
 // Morse code mapping
 var morseCode = map[string]string{
 	// letters
@@ -75,15 +70,13 @@ func NewBandpass(sampleRate, center, bandwidth float64) *Biquad {
 
 func (f *Biquad) Filter(x float64) float64 {
 	y := f.b[0]*x + f.b[1]*f.x[0] + f.b[2]*f.x[1] - f.a[1]*f.y[0] - f.a[2]*f.y[1]
-	f.x[1] = f.x[0]
-	f.x[0] = x
-	f.y[1] = f.y[0]
-	f.y[0] = y
+	f.x[1], f.x[0] = f.x[0], x
+	f.y[1], f.y[0] = f.y[0], y
 	return y
 }
 
 // Applies a bandpass filter to a FloatBuffer's Data (modifies in place)
-func DenoiseMorse(buf *audio.FloatBuffer, low, high float64) {
+func Denoise(buf *audio.FloatBuffer, low, high float64) {
 	center := (low + high) / 2
 	bw := high - low
 	bpf := NewBandpass(float64(buf.Format.SampleRate), center, bw)
@@ -871,6 +864,9 @@ type App struct {
 
 	startTime time.Time
 
+	minFreq float64
+	maxFreq float64
+
 	reader    *AudioReader
 	player    *AudioWriter
 	mode      *MorseDecoder
@@ -883,7 +879,8 @@ type App struct {
 	tone     int
 	mag      float64
 
-	mute bool
+	mute   bool
+	filter bool
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -1197,14 +1194,15 @@ func (app *App) MainLoop() {
 		// Convert to mono (in place)
 		transforms.MonoDownmix(floatBuf)
 
-		// denoise ?
-		//DenoiseMorse(floatBuf, minToneFreq, maxToneFreq)
+		if app.filter {
+			Denoise(floatBuf, app.minFreq, app.maxFreq)
+		}
 
 		d := float64(len(floatBuf.Data)) / float64(app.reader.SampleRate)
 		app.duration += int(d * 1000)
 
 		// Automatically detect the Morse code tone frequency
-		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, minToneFreq, maxToneFreq)
+		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
 
 		app.tone = int(centerFreq)
 		app.mag = magnitude
@@ -1214,15 +1212,15 @@ func (app *App) MainLoop() {
 		highCutoff := centerFreq + app.bandwidth/2
 
 		// Ensure reasonable bounds
-		if lowCutoff < minToneFreq {
-			lowCutoff = minToneFreq
+		if lowCutoff < app.minFreq {
+			lowCutoff = app.minFreq
 		}
-		if highCutoff > maxToneFreq {
-			highCutoff = maxToneFreq
+		if highCutoff > app.maxFreq {
+			highCutoff = app.maxFreq
 		}
 
 		// Apply bandpass filter centered on detected frequency
-		DenoiseMorse(floatBuf, lowCutoff, highCutoff)
+		Denoise(floatBuf, lowCutoff, highCutoff)
 
 		if app.player != nil {
 			app.player.Write(floatBuf)
@@ -1303,6 +1301,9 @@ func main() {
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
+	filter := flag.Bool("filter", true, "enable bandpass filter")
+	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
+	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
 	sep := flag.Bool("separator", false, "output separator '_' between decoded segments")
 
@@ -1408,10 +1409,13 @@ func main() {
 		bandwidth: *bandwidth,
 		threshold: *threshold,
 		noiseGate: *noiseGate,
+		minFreq:   *minFreq,
+		maxFreq:   *maxFreq,
 		sep:       *sep,
 		reader:    reader,
 		player:    player,
 		mode:      NewMorseDecoder(*wpm),
+		filter:    *filter,
 	}
 
 	if g != nil {
