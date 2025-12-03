@@ -68,6 +68,44 @@ func NewBandpass(sampleRate, center, bandwidth float64) *Biquad {
 	}
 }
 
+// Boost designs a peaking EQ filter.
+// gain: linear gain at peak (not dB!)
+// fc: center frequency (Hz)
+// bw: bandwidth (Hz) [default: fs/10]
+// fs: sampling rate (Hz) [default: 1]
+// Returns B (numerator) and A (denominator) coefficients.
+func NewBoost(gain, fc, bw, fs float64) *Biquad {
+	// Set defaults
+	if fs == 0 {
+		fs = 1
+	}
+	if bw == 0 {
+		bw = fs / 10
+	}
+
+	Q := fs / bw
+	wcT := 2 * math.Pi * fc / fs
+
+	K := math.Tan(wcT / 2)
+	V := gain
+
+	// Numerator coefficients
+	b0 := 1 + V*K/Q + K*K
+	b1 := 2 * (K*K - 1)
+	b2 := 1 - V*K/Q + K*K
+
+	// Denominator coefficients
+	a0 := 1 + K/Q + K*K
+	a1 := 2 * (K*K - 1)
+	a2 := 1 - K/Q + K*K
+
+	// Normalize coefficients and return
+	return &Biquad{
+		b: [3]float64{b0 / a0, b1 / a0, b2 / a0},
+		a: [3]float64{1, a1 / a0, a2 / a0},
+	}
+}
+
 func (f *Biquad) Filter(x float64) float64 {
 	y := f.b[0]*x + f.b[1]*f.x[0] + f.b[2]*f.x[1] - f.a[1]*f.y[0] - f.a[2]*f.y[1]
 	f.x[1], f.x[0] = f.x[0], x
@@ -83,6 +121,21 @@ func Denoise(buf *audio.FloatBuffer, low, high float64) {
 	for i, s := range buf.Data {
 		buf.Data[i] = bpf.Filter(s)
 	}
+}
+
+type AudioFilter func(buf *audio.FloatBuffer, low, high float64)
+
+// Applies a boost filter to a FloatBuffer's Data (modifies in place)
+func BoostSignal(buf *audio.FloatBuffer, gain, center, bandwidth float64) {
+	boost := NewBoost(gain, center, bandwidth, float64(buf.Format.SampleRate))
+	for i, s := range buf.Data {
+		buf.Data[i] = boost.Filter(s)
+	}
+}
+
+// apply 3db peak boost filter
+func AudioPeakFilter(buf *audio.FloatBuffer, low, high float64) {
+	BoostSignal(buf, 1.413, (low+high)/2, high-low)
 }
 
 // FFT performs a Fast Fourier Transform using Cooley-Tukey algorithm
@@ -880,7 +933,7 @@ type App struct {
 	mag      float64
 
 	mute   bool
-	filter bool
+	filter AudioFilter
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -1194,10 +1247,6 @@ func (app *App) MainLoop() {
 		// Convert to mono (in place)
 		transforms.MonoDownmix(floatBuf)
 
-		if app.filter {
-			Denoise(floatBuf, app.minFreq, app.maxFreq)
-		}
-
 		d := float64(len(floatBuf.Data)) / float64(app.reader.SampleRate)
 		app.duration += int(d * 1000)
 
@@ -1219,8 +1268,10 @@ func (app *App) MainLoop() {
 			highCutoff = app.maxFreq
 		}
 
-		// Apply bandpass filter centered on detected frequency
-		Denoise(floatBuf, lowCutoff, highCutoff)
+		// Apply filter centered on detected frequency
+		if app.filter != nil {
+			app.filter(floatBuf, lowCutoff, highCutoff)
+		}
 
 		if app.player != nil {
 			app.player.Write(floatBuf)
@@ -1301,7 +1352,7 @@ func main() {
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
-	filter := flag.Bool("filter", true, "enable bandpass filter")
+	filter := flag.String("filter", "bp", "apply bandpass filter (bp), audio peak filter (apf), or no filter (none)")
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
@@ -1403,6 +1454,14 @@ func main() {
 		defer g.Close()
 	}
 
+	var af AudioFilter
+	switch *filter {
+	case "bp":
+		af = Denoise
+	case "apf":
+		af = AudioPeakFilter
+	}
+
 	app := App{
 		gui:       g,
 		startTime: time.Now(),
@@ -1415,7 +1474,7 @@ func main() {
 		reader:    reader,
 		player:    player,
 		mode:      NewMorseDecoder(*wpm),
-		filter:    *filter,
+		filter:    af,
 	}
 
 	if g != nil {
