@@ -973,11 +973,18 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 			fmt.Fprintf(app.vcmd, "  v: -volume")
 		}
 
-		fmt.Fprintf(app.vcmd, "  s: toggle separator\n")
+		if app.player != nil {
+			fmt.Fprintf(app.vcmd, "  f: toggle filter      s: toggle separator\n")
+		} else {
+			fmt.Fprintf(app.vcmd, "  f: toggle filter\n")
+		}
+
 		fmt.Fprintf(app.vcmd, "c: clear     B: +bandwidth  W: +wpm  N: +noise T: +threshold")
 
 		if app.player != nil {
 			fmt.Fprintf(app.vcmd, "  V: +volume  m: toggle audio/mute")
+		} else {
+			fmt.Fprintf(app.vcmd, "  s: toggle separator")
 		}
 	}
 
@@ -1162,6 +1169,33 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	if err := app.gui.SetKeybinding("", 't', gocui.ModNone, thresholdDown); err != nil {
+		return err
+	}
+
+	//
+	// toggle filter: f
+	//
+
+	toggleFilter := func(g *gocui.Gui, v *gocui.View) error {
+		switch app.fname {
+		case "no":
+			app.fname = "bp"
+			app.filter = Denoise
+		case "bp":
+			app.fname = "apf"
+			app.filter = AudioPeakFilter
+		case "apf":
+			app.fname = "no"
+			app.filter = nil
+		default:
+			// Default to bandpass if unknown
+			app.fname = "bp"
+			app.filter = Denoise
+		}
+		return nil
+	}
+
+	if err := app.gui.SetKeybinding("", 'f', gocui.ModNone, toggleFilter); err != nil {
 		return err
 	}
 
