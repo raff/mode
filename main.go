@@ -188,10 +188,10 @@ func FFT(x []complex128) []complex128 {
 	return result
 }
 
-// DetectDominantFrequency finds the dominant frequency in the signal using FFT
-func DetectDominantFrequency(data []float64, sampleRate int, minFreq, maxFreq float64) (float64, float64) {
+// ComputeSpectrum performs FFT and returns the magnitude spectrum and the hamming window sum
+func ComputeSpectrum(data []float64, sampleRate int) ([]float64, float64) {
 	if len(data) <= 2 {
-		return 0.0, 0.0
+		return nil, 0.0
 	}
 
 	// Use a reasonable window size (power of 2)
@@ -226,8 +226,21 @@ func DetectDominantFrequency(data []float64, sampleRate int, minFreq, maxFreq fl
 		magnitudes[i] = cmplx.Abs(fftResult[i])
 	}
 
+	return magnitudes, hammingSum
+}
+
+// DetectDominantFrequency finds the dominant frequency in the signal using the pre-computed spectrum
+func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) (float64, float64) {
+	if len(magnitudes) == 0 {
+		return 0.0, 0.0
+	}
+
 	// Find peak frequency within the specified range
-	freqResolution := float64(sampleRate) / float64(len(fftResult))
+	// The spectrum size corresponds to half the window size used in ComputeSpectrum
+	// We need to reconstruct the window size to calculate freqResolution
+	windowSize := len(magnitudes) * 2
+	freqResolution := float64(sampleRate) / float64(windowSize)
+
 	minBin := int(minFreq / freqResolution)
 	maxBin := int(maxFreq / freqResolution)
 
@@ -262,6 +275,84 @@ func DetectDominantFrequency(data []float64, sampleRate int, minFreq, maxFreq fl
 	}
 
 	return peakFrequency, 2 * peakMagnitude / hammingSum
+}
+
+// Spectrogram8x8 generates an 8x8 spectrogram representation from the magnitude spectrum
+func Spectrogram8x8(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) [8]int {
+	var result [8]int
+	if len(magnitudes) == 0 {
+		return result
+	}
+
+	windowSize := len(magnitudes) * 2
+	freqResolution := float64(sampleRate) / float64(windowSize)
+
+	minBin := int(minFreq / freqResolution)
+	maxBin := int(maxFreq / freqResolution)
+
+	if minBin < 0 {
+		minBin = 0
+	}
+	if maxBin >= len(magnitudes) {
+		maxBin = len(magnitudes) - 1
+	}
+
+	if maxBin <= minBin {
+		return result
+	}
+
+	// Calculate band width in bins
+	totalBins := maxBin - minBin + 1
+	binsPerBand := float64(totalBins) / 8.0
+
+	for i := 0; i < 8; i++ {
+		startBin := minBin + int(float64(i)*binsPerBand)
+		endBin := minBin + int(float64(i+1)*binsPerBand)
+		if endBin > maxBin+1 {
+			endBin = maxBin + 1
+		}
+		if startBin >= endBin {
+			startBin = endBin - 1
+		}
+
+		sum := 0.0
+		count := 0
+		for j := startBin; j < endBin; j++ {
+			if j >= 0 && j < len(magnitudes) {
+				sum += magnitudes[j]
+				count++
+			}
+		}
+
+		var avg float64
+		if count > 0 {
+			avg = sum / float64(count)
+		}
+
+		// Normalize and map to 0-7
+		// We use hammingSum to normalize, similar to DetectDominantFrequency
+		// The 2.0 factor is from the windowing correction
+		normalized := 0.0
+		if hammingSum > 0 {
+			normalized = 2 * avg / hammingSum
+		}
+
+		// Map normalized magnitude to 0-7 levels
+		// Assuming normalized is roughly 0.0 to 1.0 (or slightly more)
+		// We can use a logarithmic scale or linear. Let's try linear first, scaled up.
+		// Experimentally, values might be small.
+		// Let's assume a dynamic range or just scale it.
+		// For now, let's just multiply by a factor and clamp.
+		// A value of 1.0 is a very loud signal (0dBFS sine wave).
+		// Let's map 0.0-1.0 to 0-7.
+		level := int(normalized * 8)
+		if level > 7 {
+			level = 7
+		}
+		result[i] = level
+	}
+
+	return result
 }
 
 type ToneType int
@@ -514,8 +605,8 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 type MorseDecoder struct {
 	code string
 	wpm  int
+	fwpm int
 
-	// Exponential moving average timing values (in milliseconds)
 	ditTime int // average dit duration
 	dahTime int // average dah duration
 	mSpace  int // space between morse signals (dit/dah)
@@ -527,16 +618,18 @@ type MorseDecoder struct {
 	cm []byte
 }
 
-func NewMorseDecoder(wpm int) *MorseDecoder {
-	dTime := ditTime(wpm)
+func NewMorseDecoder(wpm, fwpm int) *MorseDecoder {
+	dtime := ditTimeMs(wpm)
+	stime := spaceTimeMs(wpm, fwpm)
 
 	return &MorseDecoder{
 		wpm:     wpm,
-		ditTime: int(dTime * 1000),
-		dahTime: int(dTime * 3000),
-		mSpace:  int(dTime * 1000),
-		chSpace: int(dTime * 3000),
-		wSpace:  int(dTime * 7000),
+		fwpm:    fwpm,
+		ditTime: dtime * 1,
+		dahTime: dtime * 3,
+		mSpace:  dtime * 1,
+		chSpace: stime * 3,
+		wSpace:  stime * 7,
 	}
 }
 
@@ -561,6 +654,16 @@ func ditTimeMs(wpm int) int {
 		wpm = 25 // default WPM
 	}
 	return 1200 / wpm
+}
+
+func spaceTimeMs(wpm, fwpm int) int {
+	if fwpm > 0 {
+		// see https://www.arrl.org/files/file/Technology/x9004008.pdf
+		ta := ((60.0 * float64(wpm)) - (37.2 * float64(fwpm))) / float64(fwpm*wpm)
+		return int(ta * 1000 / 19)
+	}
+
+	return ditTimeMs(wpm)
 }
 
 func (d *MorseDecoder) deCode(code string) string {
@@ -609,7 +712,7 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	*/
 
 	dtime := ditTimeMs(d.wpm)
-	stime := ditTimeMs(d.wpm)
+	stime := spaceTimeMs(d.wpm, d.fwpm)
 
 	for _, seg := range segments {
 		durMs := int(seg.Duration * 1000) // Convert to milliseconds
@@ -938,9 +1041,10 @@ type App struct {
 	tone     int
 	mag      float64
 
-	mute   bool
-	filter AudioFilter
-	fname  string
+	mute        bool
+	filter      AudioFilter
+	fname       string
+	spectrogram [8]int
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -1014,6 +1118,8 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		int(app.mode.tmag), // *1000),
 		int(app.mode.smag), // *1000),
 	)
+
+	fmt.Fprintf(app.vinfo, "  Spec: %v", app.spectrogram)
 
 	if app.player != nil {
 		fmt.Fprintf(app.vinfo, "   %8v  vol: %d",
@@ -1298,7 +1404,9 @@ func (app *App) MainLoop() {
 		app.duration += int(d * 1000)
 
 		// Automatically detect the Morse code tone frequency
-		centerFreq, magnitude := DetectDominantFrequency(floatBuf.Data, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
+		magnitudes, hammingSum := ComputeSpectrum(floatBuf.Data, floatBuf.Format.SampleRate)
+		centerFreq, magnitude := DetectDominantFrequency(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
+		app.spectrogram = Spectrogram8x8(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
 
 		app.tone = int(centerFreq)
 		app.mag = magnitude
@@ -1394,6 +1502,7 @@ func main() {
 	ssize := flag.Int("buffer", 300, "buffer size (in ms)")
 	//debug := flag.Bool("debug", false, "debug messages")
 	wpm := flag.Int("wpm", 20, "words per minute (for timing)")
+	fwpm := flag.Int("fwpm", 0, "Farnsworth speed")
 	dev := flag.String("device", "", "input audio device (for live decoding)")
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
@@ -1524,7 +1633,7 @@ func main() {
 		sep:       *sep,
 		reader:    reader,
 		player:    player,
-		mode:      NewMorseDecoder(*wpm),
+		mode:      NewMorseDecoder(*wpm, *fwpm),
 		filter:    af,
 		fname:     *filter,
 	}
