@@ -196,11 +196,7 @@ func DetectDominantFrequency(data []float64, sampleRate int, minFreq, maxFreq fl
 
 	// Use a reasonable window size (power of 2)
 	windowSize := 8192
-	if len(data) < windowSize {
-		windowSize = 1
-		for windowSize < len(data) {
-			windowSize <<= 1
-		}
+	for len(data) < windowSize {
 		windowSize >>= 1
 	}
 
@@ -1003,7 +999,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.SetOrigin(0, 0)
 
 	fmt.Fprintf(app.vinfo,
-		"Filter: %-4s  WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
+		"Filter: %-4s  WPM:%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Freq:%3d  Level:%3d (T:%3d S:%3d)",
 		app.fname,
 		app.mode.wpm,
 		1200/app.mode.ditTime,
@@ -1017,11 +1013,12 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		int(app.mag*1000),
 		int(app.mode.tmag), // *1000),
 		int(app.mode.smag), // *1000),
-		d.Truncate(time.Second).String(),
 	)
 
 	if app.player != nil {
-		fmt.Fprintf(app.vinfo, " vol: %d", int(app.player.Volume*10))
+		fmt.Fprintf(app.vinfo, "   %8v  vol: %d",
+			d.Truncate(time.Second).String(),
+			int(app.player.Volume*10))
 	}
 
 	return nil
