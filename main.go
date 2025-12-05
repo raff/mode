@@ -133,9 +133,11 @@ func BoostSignal(buf *audio.FloatBuffer, gain, center, bandwidth float64) {
 	}
 }
 
-// apply 3db peak boost filter
-func AudioPeakFilter(buf *audio.FloatBuffer, low, high float64) {
-	BoostSignal(buf, 1.413, (low+high)/2, high-low)
+// apply peak boost filter (3db -> 1.413, 6db -> 2.0)
+func AudioPeakFilter(gain float64) AudioFilter {
+	return func(buf *audio.FloatBuffer, low, high float64) {
+		BoostSignal(buf, gain, (low+high)/2, high-low)
+	}
 }
 
 // FFT performs a Fast Fourier Transform using Cooley-Tukey algorithm
@@ -868,6 +870,14 @@ func (r *AudioReader) Close() {
 	}
 }
 
+func (r *AudioReader) Rewind() error {
+	if r.WavDecoder != nil {
+		return r.WavDecoder.Rewind()
+	}
+
+	return nil
+}
+
 func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 	if r.Stream != nil {
 		// Read from PortAudio stream
@@ -993,7 +1003,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.SetOrigin(0, 0)
 
 	fmt.Fprintf(app.vinfo,
-		"Filter: %-3s  WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
+		"Filter: %-4s  WPM: %2d (%2d) dit: %-2dms sp: %-2d/%-3dms  NG: %3.1f Thr: %2d%%  Bw: %3d Freq: %3d Level: %3d (T: %3d S: %3d)   %8v",
 		app.fname,
 		app.mode.wpm,
 		1200/app.mode.ditTime,
@@ -1183,8 +1193,11 @@ func (app *App) SetKeyBinding() error {
 			app.filter = Denoise
 		case "bp":
 			app.fname = "apf"
-			app.filter = AudioPeakFilter
+			app.filter = AudioPeakFilter(1.413)
 		case "apf":
+			app.fname = "apf2"
+			app.filter = AudioPeakFilter(2)
+		case "apf2":
 			app.fname = "no"
 			app.filter = nil
 		default:
@@ -1496,7 +1509,9 @@ func main() {
 	case "bp":
 		af = Denoise
 	case "apf":
-		af = AudioPeakFilter
+		af = AudioPeakFilter(1.413)
+	case "apf2":
+		af = AudioPeakFilter(2)
 	default:
 		*filter = "no"
 	}
