@@ -508,7 +508,7 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 		} else if !inTone && endIdx < last {
 			addTone(endIdx, last, Silence, 100.0, 0) // add last silence
 		}
-	} else if inTone && startIdx >= 0 {
+	} else if inTone && startIdx >= 0 && last > startIdx {
 		addTone(startIdx, last, Sound, 100.0, 0) // add last tone
 	}
 
