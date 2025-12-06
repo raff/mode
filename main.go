@@ -46,6 +46,8 @@ var morseCode = map[string]string{
 	".-.-.": "<AR/+>", ".-...": "<AS>", "-...-.-": "<BK>", "...-.-": "<SK>", "-...-": "<BT/=>", "-.--.": "<KN/[>",
 }
 
+const nBands = 5 // number of frequency bands for spectrogram
+
 // Biquad filter struct, for bandpass filtering
 type Biquad struct {
 	a, b [3]float64
@@ -223,7 +225,7 @@ func ComputeSpectrum(data []float64, sampleRate int) ([]float64, float64) {
 	// Calculate magnitude spectrum
 	magnitudes := make([]float64, len(fftResult)/2)
 	for i := 0; i < len(magnitudes); i++ {
-		magnitudes[i] = cmplx.Abs(fftResult[i])
+		magnitudes[i] = 2.0 / hammingSum * cmplx.Abs(fftResult[i])
 	}
 
 	return magnitudes, hammingSum
@@ -274,12 +276,13 @@ func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRat
 		peakFrequency = (float64(peakBin) + p) * freqResolution
 	}
 
-	return peakFrequency, 2 * peakMagnitude / hammingSum
+	return peakFrequency, peakMagnitude
 }
 
-// Spectrogram8x8 generates an 8x8 spectrogram representation from the magnitude spectrum
-func Spectrogram8x8(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) [8]int {
-	var result [8]int
+var levels = [8]rune{ '\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588' }
+
+// Spectrogram generates a  spectrogram representation from the magnitude spectrum
+func Spectrogram(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) (result [nBands]rune) {
 	if len(magnitudes) == 0 {
 		return result
 	}
@@ -303,9 +306,9 @@ func Spectrogram8x8(magnitudes []float64, hammingSum float64, sampleRate int, mi
 
 	// Calculate band width in bins
 	totalBins := maxBin - minBin + 1
-	binsPerBand := float64(totalBins) / 8.0
+	binsPerBand := float64(totalBins) / nBands
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < nBands; i++ {
 		startBin := minBin + int(float64(i)*binsPerBand)
 		endBin := minBin + int(float64(i+1)*binsPerBand)
 		if endBin > maxBin+1 {
@@ -332,10 +335,10 @@ func Spectrogram8x8(magnitudes []float64, hammingSum float64, sampleRate int, mi
 		// Normalize and map to 0-7
 		// We use hammingSum to normalize, similar to DetectDominantFrequency
 		// The 2.0 factor is from the windowing correction
-		normalized := 0.0
-		if hammingSum > 0 {
-			normalized = 2 * avg / hammingSum
-		}
+		//normalized := 0.0
+		//if hammingSum > 0 {
+		//	normalized = 2 * avg / hammingSum
+		//}
 
 		// Map normalized magnitude to 0-7 levels
 		// Assuming normalized is roughly 0.0 to 1.0 (or slightly more)
@@ -345,11 +348,11 @@ func Spectrogram8x8(magnitudes []float64, hammingSum float64, sampleRate int, mi
 		// For now, let's just multiply by a factor and clamp.
 		// A value of 1.0 is a very loud signal (0dBFS sine wave).
 		// Let's map 0.0-1.0 to 0-7.
-		level := int(normalized * 8)
+		level := int(avg * 800)
 		if level > 7 {
 			level = 7
 		}
-		result[i] = level
+		result[i] = levels[level]
 	}
 
 	return result
@@ -1044,7 +1047,7 @@ type App struct {
 	mute        bool
 	filter      AudioFilter
 	fname       string
-	spectrogram [8]int
+	spectrogram [nBands]rune
 }
 
 func (app *App) Layout(g *gocui.Gui) (err error) {
@@ -1119,7 +1122,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		int(app.mode.smag), // *1000),
 	)
 
-	fmt.Fprintf(app.vinfo, "  Spec: %v", app.spectrogram)
+	fmt.Fprintf(app.vinfo, "  [%v]", string(app.spectrogram[:]))
 
 	if app.player != nil {
 		fmt.Fprintf(app.vinfo, "   %8v  vol: %d",
@@ -1226,6 +1229,42 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	if err := app.gui.SetKeybinding("", 'w', gocui.ModNone, wpmDown); err != nil {
+		return err
+	}
+
+	//
+	// Farnsworth timing up/down: T / t
+	//
+
+	fwpmUp := func(g *gocui.Gui, v *gocui.View) error {
+		if app.mode.fwpm == 0 {
+			app.mode.fwpm = app.mode.wpm
+		}
+
+		if app.mode.fwpm < 50 {
+			app.mode.fwpm++
+		}
+
+		return nil
+	}
+
+	fwpmDown := func(g *gocui.Gui, v *gocui.View) error {
+		if app.mode.fwpm == 0 {
+			app.mode.fwpm = app.mode.wpm
+		}
+
+		if app.mode.fwpm > 1 {
+			app.mode.fwpm--
+		}
+
+		return nil
+	}
+
+	if err := app.gui.SetKeybinding("", 'T', gocui.ModNone, fwpmUp); err != nil {
+		return err
+	}
+
+	if err := app.gui.SetKeybinding("", 't', gocui.ModNone, fwpmDown); err != nil {
 		return err
 	}
 
@@ -1389,7 +1428,7 @@ func (app *App) MainLoop() {
 		floatBuf, n, err := app.reader.Read()
 		if err != nil {
 			app.Print("\n\n" + err.Error() + "\n\n")
-			time.Sleep(10 * time.Second)
+
 			return
 		}
 
@@ -1406,7 +1445,7 @@ func (app *App) MainLoop() {
 		// Automatically detect the Morse code tone frequency
 		magnitudes, hammingSum := ComputeSpectrum(floatBuf.Data, floatBuf.Format.SampleRate)
 		centerFreq, magnitude := DetectDominantFrequency(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
-		app.spectrogram = Spectrogram8x8(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
+		app.spectrogram = Spectrogram(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.minFreq, app.maxFreq)
 
 		app.tone = int(centerFreq)
 		app.mag = magnitude
