@@ -678,6 +678,22 @@ func spaceTimeMs(wpm, fwpm int) int {
 	return ditTimeMs(wpm)
 }
 
+func (d *MorseDecoder) getFwpm() int {
+	if d.fwpm <= 0 {
+		return d.fwpm + d.wpm
+	}
+
+	return d.fwpm
+}
+
+func (d *MorseDecoder) setFwpm(v int) {
+	if v > d.wpm {
+		d.fwpm = 0
+	}
+
+	d.fwpm = v - d.wpm
+}
+
 func (d *MorseDecoder) deCode(code string) string {
 	if code == "" {
 		return ""
@@ -1272,16 +1288,16 @@ func (app *App) SetKeyBinding() error {
 	//
 
 	fwpmUp := func(g *gocui.Gui, v *gocui.View) error {
-		if app.mode.fwpm < 50 {
-			app.mode.fwpm++
+		if v := app.mode.getFwpm(); v < 50 {
+			app.mode.setFwpm(v + 1)
 		}
 
 		return nil
 	}
 
 	fwpmDown := func(g *gocui.Gui, v *gocui.View) error {
-		if app.mode.fwpm > 1 {
-			app.mode.fwpm--
+		if v := app.mode.getFwpm(); v > 1 {
+			app.mode.setFwpm(v - 1)
 		}
 
 		return nil
