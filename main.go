@@ -1157,8 +1157,9 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	}
 
 	fmt.Fprintf(app.vinfo,
-		"[%v] Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Freq:%3d  Level:%3d (T:%3d S:%3d)",
+	"[%v] Tone: %3dhz Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Level:%3d (T:%3d S:%3d)",
 		string(app.spectrogram[:]),
+		app.tone,
 		app.fname,
 		app.mode.wpm,
 		fwpm,
@@ -1169,7 +1170,6 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		app.noiseGate,
 		app.threshold,
 		int(app.bandwidth),
-		app.tone,
 		int(app.mag*1000),
 		int(app.mode.tmag), // *1000),
 		int(app.mode.smag), // *1000),
