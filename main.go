@@ -623,7 +623,7 @@ type MorseDecoder struct {
 }
 
 func NewMorseDecoder(wpm, fwpm int) *MorseDecoder {
-	if fwpm == 0 || fwpm > wpm {
+	if fwpm > wpm {
 		fwpm = wpm
 	}
 
@@ -1136,7 +1136,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.SetOrigin(0, 0)
 
 	fwpm := app.mode.fwpm
-	if fwpm < 0 {
+	if fwpm <= 0 {
 		fwpm += app.mode.wpm
 	}
 
