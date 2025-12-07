@@ -17,6 +17,7 @@ import (
 	"github.com/go-audio/transforms"
 	"github.com/go-audio/wav"
 	"github.com/gordonklaus/portaudio"
+	"github.com/j-04/gocui-component"
 	"github.com/jroimartin/gocui"
 )
 
@@ -279,7 +280,7 @@ func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRat
 	return peakFrequency, peakMagnitude
 }
 
-var levels = [8]rune{ '\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588' }
+var levels = [8]rune{'\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588'}
 
 // Spectrogram generates a  spectrogram representation from the magnitude spectrum
 func Spectrogram(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) (result [nBands]rune) {
@@ -622,6 +623,10 @@ type MorseDecoder struct {
 }
 
 func NewMorseDecoder(wpm, fwpm int) *MorseDecoder {
+	if fwpm == 0 || fwpm > wpm {
+		fwpm = wpm
+	}
+
 	dtime := ditTimeMs(wpm)
 	stime := spaceTimeMs(wpm, fwpm)
 
@@ -660,7 +665,11 @@ func ditTimeMs(wpm int) int {
 }
 
 func spaceTimeMs(wpm, fwpm int) int {
-	if fwpm > 0 {
+	if fwpm < 0 {
+		fwpm += wpm
+	}
+
+	if fwpm > 0 && fwpm < wpm {
 		// see https://www.arrl.org/files/file/Technology/x9004008.pdf
 		ta := ((60.0 * float64(wpm)) - (37.2 * float64(fwpm))) / float64(fwpm*wpm)
 		return int(ta * 1000 / 19)
@@ -765,7 +774,15 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	return text
 }
 
-func listAudioDevices() ([]string, error) {
+type audioType int
+
+const (
+	audioInOut audioType = iota
+	audioIn
+	audioOut
+)
+
+func listAudioDevices(t audioType) ([]string, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
 		return nil, err
@@ -776,11 +793,24 @@ func listAudioDevices() ([]string, error) {
 	for _, d := range devices {
 		v := d.Name
 
-		if d.MaxInputChannels > 0 {
-			v += fmt.Sprintf(" (in:%v)", d.MaxInputChannels)
-		}
-		if d.MaxOutputChannels > 0 {
-			v += fmt.Sprintf(" (out:%v)", d.MaxOutputChannels)
+		switch t {
+		case audioInOut:
+			if d.MaxInputChannels > 0 {
+				v += fmt.Sprintf(" (in:%v)", d.MaxInputChannels)
+			}
+			if d.MaxOutputChannels > 0 {
+				v += fmt.Sprintf(" (out:%v)", d.MaxOutputChannels)
+			}
+
+		case audioIn:
+			if d.MaxInputChannels == 0 { // output
+				continue
+			}
+
+		case audioOut:
+			if d.MaxOutputChannels == 0 { // input
+				continue
+			}
 		}
 
 		list = append(list, v)
@@ -1105,10 +1135,17 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 
+	fwpm := app.mode.fwpm
+	if fwpm < 0 {
+		fwpm += app.mode.wpm
+	}
+
 	fmt.Fprintf(app.vinfo,
-		"Filter: %-4s  WPM:%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Freq:%3d  Level:%3d (T:%3d S:%3d)",
+		"[%v] Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Freq:%3d  Level:%3d (T:%3d S:%3d)",
+		string(app.spectrogram[:]),
 		app.fname,
 		app.mode.wpm,
+		fwpm,
 		1200/app.mode.ditTime,
 		app.mode.ditTime,
 		app.mode.mSpace,
@@ -1121,8 +1158,6 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		int(app.mode.tmag), // *1000),
 		int(app.mode.smag), // *1000),
 	)
-
-	fmt.Fprintf(app.vinfo, "  [%v]", string(app.spectrogram[:]))
 
 	if app.player != nil {
 		fmt.Fprintf(app.vinfo, "   %8v  vol: %d",
@@ -1237,10 +1272,6 @@ func (app *App) SetKeyBinding() error {
 	//
 
 	fwpmUp := func(g *gocui.Gui, v *gocui.View) error {
-		if app.mode.fwpm == 0 {
-			app.mode.fwpm = app.mode.wpm
-		}
-
 		if app.mode.fwpm < 50 {
 			app.mode.fwpm++
 		}
@@ -1249,10 +1280,6 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	fwpmDown := func(g *gocui.Gui, v *gocui.View) error {
-		if app.mode.fwpm == 0 {
-			app.mode.fwpm = app.mode.wpm
-		}
-
 		if app.mode.fwpm > 1 {
 			app.mode.fwpm--
 		}
@@ -1537,6 +1564,50 @@ func (app *App) MainLoop() {
 	app.Print("\n\nDone\n\n")
 }
 
+var (
+	FormSelect = fmt.Errorf("form-selected")
+	FormCancel = fmt.Errorf("form-cancel")
+)
+
+func guiSelectAudio(ssize int) (reader *AudioReader) {
+	g, err := gocui.NewGui(gocui.OutputNormal)
+	if err != nil {
+		log.Panicln(err)
+	}
+	defer g.Close()
+
+	list, err := listAudioDevices(audioIn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	form := component.NewForm(g, "Select input device", 8, len(list), 0, 0)
+	sel := form.AddSelect("Device:", 8, 40).AddOptions(list...)
+
+	form.AddButton("Select", func(g *gocui.Gui, v *gocui.View) error {
+		reader, err = FromAudioStream(sel.GetSelected(), ssize)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		form.Close(g, v)
+		return FormSelect
+	})
+
+	form.AddButton("Cancel", func(g *gocui.Gui, v *gocui.View) error {
+		form.Close(g, v)
+		return FormCancel
+	})
+
+	form.Draw()
+
+	if err := g.MainLoop(); err != FormSelect && err != FormCancel {
+		log.Panicln(err)
+	}
+
+	return
+}
+
 func main() {
 	ssize := flag.Int("buffer", 300, "buffer size (in ms)")
 	//debug := flag.Bool("debug", false, "debug messages")
@@ -1544,6 +1615,7 @@ func main() {
 	fwpm := flag.Int("fwpm", 0, "Farnsworth speed")
 	dev := flag.String("device", "", "input audio device (for live decoding)")
 	out := flag.String("play", "", "output audio device (for monitoring)")
+	list := flag.Bool("list", false, "list audio devices")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
@@ -1571,13 +1643,13 @@ func main() {
 		defer portaudio.Terminate()
 	}
 
-	if *dev == "" && flag.NArg() == 0 {
+	if *list || (*noui && *dev == "" && flag.NArg() == 0) {
 		fmt.Println()
 		fmt.Printf("Usage: %v [options] [filename]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 		fmt.Println()
 
-		l, err := listAudioDevices()
+		l, err := listAudioDevices(audioInOut)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1628,8 +1700,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else {
+	} else if *noui {
 		log.Fatal("no input source specified")
+	} else {
+		reader = guiSelectAudio(*ssize)
 	}
 
 	if *out != "" {
@@ -1675,6 +1749,10 @@ func main() {
 		mode:      NewMorseDecoder(*wpm, *fwpm),
 		filter:    af,
 		fname:     *filter,
+	}
+
+	if app.reader == nil {
+		log.Fatal("No audio selected")
 	}
 
 	if g != nil {

@@ -7,6 +7,7 @@ require (
 	github.com/go-audio/transforms v0.0.0-20180121090939-51830ccc35a5
 	github.com/go-audio/wav v1.1.0
 	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
+	github.com/j-04/gocui-component v0.0.0-20190406233618-9b1c71353c96
 	github.com/jroimartin/gocui v0.5.0
 )
 
