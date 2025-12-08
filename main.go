@@ -454,7 +454,7 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate float64, debug bool) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate float64) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope with window size appropriate for the sample rate
@@ -1157,7 +1157,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	}
 
 	fmt.Fprintf(app.vinfo,
-	"[%v] Tone: %3dhz Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Level:%3d (T:%3d S:%3d)",
+		"[%v] Tone: %3dhz Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Level:%3d (T:%3d S:%3d)",
 		string(app.spectrogram[:]),
 		app.tone,
 		app.fname,
@@ -1515,11 +1515,7 @@ func (app *App) MainLoop() {
 		}
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, app.noiseGate, false)
-
-		/* if *debug {
-			fmt.Println("segments:", toneSegments, "prev:", String(prevTone))
-		} */
+		toneSegments = DetectMorseTones(floatBuf, app.mode.wpm, thresholdRatio, centerFreq, app.bandwidth, app.noiseGate)
 
 		if prevTone != nil {
 			if len(toneSegments) == 0 { // can this still happen ?
@@ -1626,7 +1622,6 @@ func guiSelectAudio(ssize int) (reader *AudioReader) {
 
 func main() {
 	ssize := flag.Int("buffer", 300, "buffer size (in ms)")
-	//debug := flag.Bool("debug", false, "debug messages")
 	wpm := flag.Int("wpm", 20, "words per minute (for timing)")
 	fwpm := flag.Int("fwpm", 0, "Farnsworth speed")
 	dev := flag.String("device", "", "input audio device (for live decoding)")
