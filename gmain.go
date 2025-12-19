@@ -486,6 +486,7 @@ func main() {
 
 	freqLabel := boldText("100")
 	audiospectrum := boldText("")
+	calcWpm := boldText("(00)")
 	textOut := NewTextLog("")
 	textOut.Wrapping = fyne.TextWrapWord
 	textOut.Scroll = container.ScrollVerticalOnly
@@ -496,7 +497,9 @@ func main() {
 		boldText("Freq:"), freqLabel,
 		boldText("Filter:"), filterSel,
 		boldText("WPM:"), stepper1,
-		boldText("FWPM:"), stepper2)
+		boldText("FWPM:"), stepper2,
+		calcWpm,
+	)
 
 	// Arrange the widgets in a vertical container
 	content := container.NewBorder(
@@ -532,6 +535,7 @@ func main() {
 	modeApp.Update = func() {
 		fyne.Do(func() {
 			freqLabel.SetText(strconv.Itoa(modeApp.Tone))
+			calcWpm.SetText(fmt.Sprintf("(%v)", 1200/modeApp.Mode.ditTime))
 			audiospectrum.SetText(string(modeApp.Spectrogram[:]))
 		})
 	}
