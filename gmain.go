@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gordonklaus/portaudio"
 
@@ -195,13 +196,11 @@ func (s *NumericStepper) buildUI() {
 
 	upIcon := widget.NewIcon(theme.Icon(theme.IconNameArrowDropUp))
 	upButton := wrapper.MakeTappable(upIcon, func(e *fyne.PointEvent) {
-		fmt.Println("Up button tapped")
 		s.Increment()
 	})
 
 	downIcon := widget.NewIcon(theme.Icon(theme.IconNameArrowDropDown))
 	downButton := wrapper.MakeTappable(downIcon, func(e *fyne.PointEvent) {
-		fmt.Println("Down button tapped")
 		s.Decrement()
 	})
 
@@ -262,6 +261,45 @@ func (s *NumericStepper) SetValue(value int) {
 // CreateRenderer returns the widget renderer
 func (s *NumericStepper) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(s.container)
+}
+
+// TextLog is a wrapper around widget.RichText that supports appending text
+type TextLog struct {
+	*widget.RichText
+}
+
+// NewTextLog creates a new TextLog with initial text
+func NewTextLog(text string) *TextLog {
+	t := &TextLog{
+		RichText: widget.NewRichTextWithText(text),
+	}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+// Append adds text to the log.
+// If text contains a space or the last segment isn't text, it adds a new TextSegment.
+func (t *TextLog) Append(text string) {
+	parts := strings.Split(text, " ")
+	if len(parts) == 0 {
+		return
+	}
+
+	if len(t.Segments) > 0 {
+		if seg, ok := t.Segments[len(t.Segments)-1].(*widget.TextSegment); ok {
+			seg.Text += parts[0]
+			parts = parts[1:]
+		}
+	}
+
+	for _, p := range parts {
+		t.Segments = append(t.Segments, &widget.TextSegment{
+			Text:  p + " ",
+			Style: widget.RichTextStyleInline,
+		})
+	}
+
+	t.Refresh()
 }
 
 func main() {
@@ -375,14 +413,19 @@ func main() {
 	var af AudioFilter
 	switch *filter {
 	case "bp":
+		*filter = "Bandpass"
 		af = Denoise
 	case "apf":
+		*filter = "APF"
 		af = AudioPeakFilter(1.413)
 	case "apf2":
+		*filter = "APF 2"
 		af = AudioPeakFilter(2)
 	default:
-		*filter = "no"
+		*filter = "None"
 	}
+
+	var modeApp DecoderApp
 
 	// Create a new application
 	myApp := app.New()
@@ -406,23 +449,46 @@ func main() {
 	statusLabel := boldText("")
 
 	// Create a numeric stepper widget (min: 0, max: 100, initial: 50)
-	stepper1 := NewNumericStepper(0, 100, 50, 5, func(value int) {
-		statusLabel.SetText(fmt.Sprintf("Current value: %d", value))
+	stepper1 := NewNumericStepper(5, 50, *wpm, 1, func(value int) {
+		modeApp.Mode.wpm = value
 	})
 
-	stepper2 := NewNumericStepper(-10, 10, 0, 1, func(value int) {
-		statusLabel.SetText(fmt.Sprintf("Current value: %d", value))
+	var fw int
+	if *fwpm == 0 || *fwpm >= *wpm {
+		fw = *wpm
+	} else if *fwpm < 0 {
+		fw = *wpm + *fwpm
+	} else {
+		fw = *fwpm
+	}
+
+	stepper2 := NewNumericStepper(5, 50, fw, 1, func(value int) {
+		modeApp.Mode.setFwpm(value)
 	})
 
 	filterSel := widget.NewSelect([]string{"None", "Bandpass", "APF", "APF 2"}, func(selected string) {
-		statusLabel.SetText("Selected filter: " + selected)
+		switch selected {
+		case "None":
+			modeApp.Filter = nil
+
+		case "Bandpass":
+			modeApp.Filter = Denoise
+
+		case "APF":
+			modeApp.Filter = AudioPeakFilter(1.413)
+
+		case "APF 2":
+			modeApp.Filter = AudioPeakFilter(2)
+		}
 	})
 
-	filterSel.SetSelectedIndex(0)
+	filterSel.SetSelected(*filter)
 
 	freqLabel := boldText("100")
 	audiospectrum := boldText("")
-	textGrid := widget.NewTextGrid()
+	textOut := NewTextLog("")
+	textOut.Wrapping = fyne.TextWrapWord
+	textOut.Scroll = container.ScrollVerticalOnly
 
 	// Create the toolbar container
 	toolbar := container.NewHBox(
@@ -438,10 +504,10 @@ func main() {
 		withBorder(statusLabel), // bottom
 		nil,                     // left
 		nil,                     // right
-		withBorder(textGrid),    // middle
+		withBorder(textOut),     // middle
 	)
 
-	modeApp := DecoderApp{
+	modeApp = DecoderApp{
 		Bandwidth: *bandwidth,
 		Threshold: *threshold,
 		NoiseGate: *noiseGate,
@@ -458,7 +524,7 @@ func main() {
 		},
 		AddText: func(s string) {
 			fyne.Do(func() {
-				textGrid.Append(s)
+				textOut.Append(s)
 			})
 		},
 	}
