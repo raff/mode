@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"image/color"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,7 +19,9 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"fyne.io/x/fyne/wrapper"
@@ -500,8 +503,37 @@ func main() {
 	textOut.Wrapping = fyne.TextWrapWord
 	textOut.Scroll = container.ScrollVerticalOnly
 
+	deviceBtn := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() {
+	})
+
+	fileBtn := widget.NewButtonWithIcon("", theme.FileAudioIcon(), func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, myWindow)
+				return
+			}
+			if reader == nil {
+				log.Println("Cancelled")
+				return
+			}
+
+			wr, err := FromWaveFile(reader.(io.ReadSeeker), 1)
+			if err != nil {
+				dialog.ShowError(err, myWindow)
+				return
+			}
+
+			// do something with wr
+			wr.Close()
+		}, myWindow)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
+		fd.Show()
+	})
+
 	// Create the toolbar container
 	toolbar := container.NewHBox(
+		deviceBtn,
+		fileBtn,
 		withBorder(audiospectrum),
 		boldText("Freq:"), freqLabel,
 		boldText("Filter:"), filterSel,
@@ -514,9 +546,15 @@ func main() {
 		textOut.Clear()
 	})
 
+	quitBtn := widget.NewButtonWithIcon("", theme.LogoutIcon(), func() {
+		myApp.Quit()
+	})
+
 	bottom := container.NewHBox(
 		clearBtn,
 		statusLabel,
+		layout.NewSpacer(),
+		quitBtn,
 	)
 
 	// Arrange the widgets in a vertical container
