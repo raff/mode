@@ -177,21 +177,24 @@ func (s *NumericStepper) buildUI() {
 		if content == "" {
 			return
 		}
+
 		if num, err := strconv.Atoi(content); err == nil {
-			if num >= s.vmin && num <= s.vmax {
+			if num < s.vmin {
+				num = s.vmin
+			} else if num > s.vmax {
+				num = s.vmax
+			}
+
+			if num != s.value {
 				s.value = num
 				if s.onChange != nil {
 					s.onChange(s.value)
 				}
-			} else if num < s.vmin {
-				s.entry.SetText(fmt.Sprintf("%d", s.vmin))
-			} else if num > s.vmax {
-				s.entry.SetText(fmt.Sprintf("%d", s.vmax))
 			}
-		} else {
-			// Reset to current value if invalid
-			s.entry.SetText(fmt.Sprintf("%d", s.value))
 		}
+
+		// update to new value or reset to original value
+		s.updateDisplay()
 	}
 
 	upIcon := widget.NewIcon(theme.Icon(theme.IconNameArrowDropUp))
@@ -300,6 +303,10 @@ func (t *TextLog) Append(text string) {
 	}
 
 	t.Refresh()
+}
+
+func (t *TextLog) Clear() {
+	t.Segments = t.Segments[:0]
 }
 
 func main() {
@@ -448,11 +455,6 @@ func main() {
 
 	statusLabel := boldText("")
 
-	// Create a numeric stepper widget (min: 0, max: 100, initial: 50)
-	stepper1 := NewNumericStepper(5, 50, *wpm, 1, func(value int) {
-		modeApp.Mode.wpm = value
-	})
-
 	var fw int
 	if *fwpm == 0 || *fwpm >= *wpm {
 		fw = *wpm
@@ -462,8 +464,15 @@ func main() {
 		fw = *fwpm
 	}
 
-	stepper2 := NewNumericStepper(5, 50, fw, 1, func(value int) {
+	fwpmStepper := NewNumericStepper(5, 50, fw, 1, func(value int) {
 		modeApp.Mode.setFwpm(value)
+	})
+
+	// Create a numeric stepper widget (min: 0, max: 100, initial: 50)
+	wpmStepper := NewNumericStepper(5, 50, *wpm, 1, func(value int) {
+		modeApp.Mode.wpm = value
+
+		fwpmStepper.SetValue(modeApp.Mode.getFwpm())
 	})
 
 	filterSel := widget.NewSelect([]string{"None", "Bandpass", "APF", "APF 2"}, func(selected string) {
@@ -496,18 +505,27 @@ func main() {
 		withBorder(audiospectrum),
 		boldText("Freq:"), freqLabel,
 		boldText("Filter:"), filterSel,
-		boldText("WPM:"), stepper1,
-		boldText("FWPM:"), stepper2,
+		boldText("WPM:"), wpmStepper,
+		boldText("FWPM:"), fwpmStepper,
 		calcWpm,
+	)
+
+	clearBtn := widget.NewButton("Clear", func() {
+		textOut.Clear()
+	})
+
+	bottom := container.NewHBox(
+		clearBtn,
+		statusLabel,
 	)
 
 	// Arrange the widgets in a vertical container
 	content := container.NewBorder(
-		withBorder(toolbar),     // top
-		withBorder(statusLabel), // bottom
-		nil,                     // left
-		nil,                     // right
-		withBorder(textOut),     // middle
+		withBorder(toolbar), // top
+		withBorder(bottom),  // bottom
+		nil,                 // left
+		nil,                 // right
+		withBorder(textOut), // middle
 	)
 
 	modeApp = DecoderApp{
@@ -535,7 +553,11 @@ func main() {
 	modeApp.Update = func() {
 		fyne.Do(func() {
 			freqLabel.SetText(strconv.Itoa(modeApp.Tone))
-			calcWpm.SetText(fmt.Sprintf("(%v)", 1200/modeApp.Mode.ditTime))
+			calcWpm.SetText(fmt.Sprintf("(%2d) dit:%-2dms sp:%-2d/%-3dms",
+				1200/modeApp.Mode.ditTime,
+				modeApp.Mode.ditTime,
+				modeApp.Mode.mSpace,
+				modeApp.Mode.wSpace))
 			audiospectrum.SetText(string(modeApp.Spectrogram[:]))
 		})
 	}
