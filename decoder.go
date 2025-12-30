@@ -944,6 +944,8 @@ func (w *AudioWriter) Write(b *audio.FloatBuffer) error {
 }
 
 type AudioReader struct {
+	Id string // device name or filename
+
 	Stream       *portaudio.Stream
 	StreamBuffer audio.Float32Buffer
 
@@ -1017,6 +1019,7 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 	}
 
 	return &AudioReader{
+		Id:           info.Name,
 		Stream:       stream,
 		StreamBuffer: buf32,
 		SampleRate:   sampleRate,

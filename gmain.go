@@ -504,6 +504,45 @@ func main() {
 	textOut.Scroll = container.ScrollVerticalOnly
 
 	deviceBtn := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() {
+		l, err := ListAudioDevices(AudioIn)
+		if err != nil {
+			dialog.ShowError(err, myWindow)
+			return
+		}
+
+		deviceSel := widget.NewSelect(l, func(selected string) {
+			log.Println("device selected:", selected)
+		})
+
+		if modeApp.Reader != nil {
+			deviceSel.SetSelected(modeApp.Reader.Id)
+		}
+
+		deviceDialog := dialog.NewForm(
+			"Select audio device",
+			"Select",
+			"Cancel",
+			[]*widget.FormItem{
+				{Text: "Devices", Widget: deviceSel},
+			},
+			func(submitted bool) {
+				if !submitted {
+					return
+				}
+
+				ar, err := FromAudioStream(deviceSel.Selected, *ssize)
+				if err != nil {
+					dialog.ShowError(err, myWindow)
+					return
+				}
+
+				// do something with ar
+				ar.Close()
+			},
+			myWindow,
+		)
+
+		deviceDialog.Show()
 	})
 
 	fileBtn := widget.NewButtonWithIcon("", theme.FileAudioIcon(), func() {
