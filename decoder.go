@@ -8,6 +8,8 @@ import (
 	"math/cmplx"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-audio/audio"
 	"github.com/go-audio/transforms"
@@ -1090,6 +1092,9 @@ type DecoderApp struct {
 	MinFreq float64
 	MaxFreq float64
 
+	Wait bool // wait for more inputs
+	mu   sync.Mutex
+
 	Reader    *AudioReader
 	Player    *AudioWriter
 	Mode      *MorseDecoder
@@ -1111,6 +1116,29 @@ type DecoderApp struct {
 	Update    func()
 }
 
+func (app *DecoderApp) SetReader(r *AudioReader) {
+	app.mu.Lock()
+	prev := app.Reader
+	app.Reader = nil
+
+	if prev != nil {
+		app.mu.Unlock()
+		prev.Close()
+		time.Sleep(500 * time.Millisecond)
+		app.mu.Lock()
+	}
+
+	app.Reader = r
+	app.mu.Unlock()
+	app.Status("")
+}
+
+func (app *DecoderApp) GetReader() *AudioReader {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	return app.Reader
+}
+
 func (app *DecoderApp) Print(s string) {
 	if app.AddText != nil {
 		app.AddText(s)
@@ -1118,6 +1146,8 @@ func (app *DecoderApp) Print(s string) {
 }
 
 func (app *DecoderApp) Status(s string) {
+	log.Println("Status:", s)
+
 	if app.SetStatus != nil {
 		app.SetStatus(s)
 	}
@@ -1131,16 +1161,37 @@ func (app *DecoderApp) MainLoop() {
 	// Adjust this value if detection is too sensitive (lower it) or misses tones (raise it)
 
 	for {
+		reader := app.GetReader()
+		if reader == nil {
+			app.Status("Select audio input")
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+
 		thresholdRatio := float64(app.Threshold) / 100.0
 
-		floatBuf, n, err := app.Reader.Read()
+		floatBuf, n, err := reader.Read()
+
+		app.Status(fmt.Sprintf("Read %v bytes / %v", n, err))
+
 		if err != nil {
 			app.Status("Error: " + err.Error())
-			return
+			if app.Wait {
+				app.SetReader(nil)
+				continue
+			} else {
+				break
+			}
 		}
 
 		if n == 0 {
-			break
+			app.Status("No more data")
+			if app.Wait {
+				app.SetReader(nil)
+				continue
+			} else {
+				break
+			}
 		}
 
 		// Convert to mono (in place)

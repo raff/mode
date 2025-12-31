@@ -410,7 +410,7 @@ func main() {
 			log.Fatal(err)
 		}
 	} else {
-		log.Fatal("no input source specified")
+		// log.Fatal("no input source specified")
 	}
 
 	if *out != "" {
@@ -530,6 +530,8 @@ func main() {
 					return
 				}
 
+				modeApp.SetReader(nil)
+
 				ar, err := FromAudioStream(deviceSel.Selected, *ssize)
 				if err != nil {
 					dialog.ShowError(err, myWindow)
@@ -537,7 +539,7 @@ func main() {
 				}
 
 				// do something with ar
-				ar.Close()
+				modeApp.SetReader(ar)
 			},
 			myWindow,
 		)
@@ -552,7 +554,6 @@ func main() {
 				return
 			}
 			if reader == nil {
-				log.Println("Cancelled")
 				return
 			}
 
@@ -562,8 +563,10 @@ func main() {
 				return
 			}
 
+			log.Println("file selected:", reader.URI())
+
 			// do something with wr
-			wr.Close()
+			modeApp.SetReader(wr)
 		}, myWindow)
 		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
 		fd.Show()
@@ -606,6 +609,8 @@ func main() {
 	)
 
 	modeApp = DecoderApp{
+		Wait: true,
+
 		Bandwidth: *bandwidth,
 		Threshold: *threshold,
 		NoiseGate: *noiseGate,
