@@ -957,6 +957,8 @@ type AudioReader struct {
 	SampleRate int
 	Channels   int
 	SampleSize int
+
+	reading bool
 }
 
 func FromWaveFile(r io.ReadSeeker, ssize int) (*AudioReader, error) {
@@ -1031,11 +1033,17 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 }
 
 func (r *AudioReader) Close() {
+	for r.reading {
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	if r.Stream != nil {
 		r.Stream.Stop()
+		r.Stream = nil
 	}
 	if r.WavDecoder != nil {
 		// nothing to close
+		r.WavDecoder = nil
 	}
 }
 
@@ -1048,6 +1056,11 @@ func (r *AudioReader) Rewind() error {
 }
 
 func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
+	r.reading = true
+	defer func() {
+		r.reading = false
+	}()
+
 	if r.Stream != nil {
 		// Read from PortAudio stream
 		r.StreamBuffer.Data = r.StreamBuffer.Data[:]
@@ -1124,12 +1137,14 @@ func (app *DecoderApp) SetReader(r *AudioReader) {
 	if prev != nil {
 		app.mu.Unlock()
 		prev.Close()
+		prev = nil
 		time.Sleep(500 * time.Millisecond)
 		app.mu.Lock()
 	}
 
 	app.Reader = r
 	app.mu.Unlock()
+
 	app.Status("")
 }
 
@@ -1153,6 +1168,10 @@ func (app *DecoderApp) Status(s string) {
 	}
 }
 
+func (app *DecoderApp) Statusf(s string, args ...any) {
+	app.Status(fmt.Sprintf(s, args...))
+}
+
 func (app *DecoderApp) MainLoop() {
 	var toneSegments []ToneSegment
 	var prevTone *ToneSegment
@@ -1171,9 +1190,6 @@ func (app *DecoderApp) MainLoop() {
 		thresholdRatio := float64(app.Threshold) / 100.0
 
 		floatBuf, n, err := reader.Read()
-
-		app.Status(fmt.Sprintf("Read %v bytes / %v", n, err))
-
 		if err != nil {
 			app.Status("Error: " + err.Error())
 			if app.Wait {
@@ -1197,7 +1213,7 @@ func (app *DecoderApp) MainLoop() {
 		// Convert to mono (in place)
 		transforms.MonoDownmix(floatBuf)
 
-		d := float64(len(floatBuf.Data)) / float64(app.Reader.SampleRate)
+		d := float64(len(floatBuf.Data)) / float64(reader.SampleRate)
 		app.Duration += int(d * 1000)
 
 		// Automatically detect the Morse code tone frequency

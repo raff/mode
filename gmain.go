@@ -526,6 +526,8 @@ func main() {
 				{Text: "Devices", Widget: deviceSel},
 			},
 			func(submitted bool) {
+				log.Println("select audio device", submitted)
+
 				if !submitted {
 					return
 				}
@@ -556,6 +558,8 @@ func main() {
 			if reader == nil {
 				return
 			}
+
+			modeApp.SetReader(nil)
 
 			wr, err := FromWaveFile(reader.(io.ReadSeeker), 1)
 			if err != nil {
