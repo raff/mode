@@ -1,3 +1,4 @@
+//go:build nobuild
 package main
 
 import (
