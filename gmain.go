@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"image/color"
@@ -25,12 +26,40 @@ import (
 	"fyne.io/x/fyne/wrapper"
 )
 
+//go:embed assets/fonts/UbuntuMono-R.ttf
+var fontBits_R []byte
+var font_R = &fyne.StaticResource{StaticName: "UbuntuMono-R.ttf", StaticContent: fontBits_R}
+
+//go:embed assets/fonts/UbuntuMono-RI.ttf
+var fontBits_RI []byte
+var font_RI = &fyne.StaticResource{StaticName: "UbuntuMono-RI.ttf", StaticContent: fontBits_RI}
+
+//go:embed assets/fonts/UbuntuMono-B.ttf
+var fontBits_B []byte
+var font_B = &fyne.StaticResource{StaticName: "UbuntuMono-B.ttf", StaticContent: fontBits_B}
+
+//go:embed assets/fonts/UbuntuMono-BI.ttf
+var fontBits_BI []byte
+var font_BI = &fyne.StaticResource{StaticName: "UbuntuMono-BI.ttf", StaticContent: fontBits_BI}
+
 type CompactTheme struct{}
 
 var _ fyne.Theme = (*CompactTheme)(nil)
 
 func (t CompactTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return theme.DefaultTheme().Font(style)
+	if style.Bold && style.Italic {
+		return font_BI
+	}
+
+	if style.Bold {
+		return font_B
+	}
+
+	if style.Italic {
+		return font_RI
+	}
+
+	return font_R
 }
 
 func (t CompactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
@@ -44,6 +73,10 @@ func (t CompactTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
 func (t CompactTheme) Size(name fyne.ThemeSizeName) float32 {
 	if name == theme.SizeNamePadding {
 		return 2
+	}
+
+	if name == theme.SizeNameText {
+		return theme.DefaultTheme().Size(name) * 1.5
 	}
 
 	return theme.DefaultTheme().Size(name)
@@ -441,7 +474,7 @@ func main() {
 	myWindow := myApp.NewWindow("Morse Decoder")
 
 	boldText := func(s string) *widget.Label {
-		return widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		return widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
 	}
 
 	withBorder := func(o fyne.CanvasObject) fyne.CanvasObject {
@@ -636,7 +669,7 @@ func main() {
 
 	modeApp.Update = func() {
 		fyne.Do(func() {
-			freqLabel.SetText(strconv.Itoa(modeApp.Tone))
+			freqLabel.SetText(fmt.Sprintf("%-3d", modeApp.Tone))
 			calcWpm.SetText(fmt.Sprintf("(%2d) dit:%-2dms sp:%-2d/%-3dms",
 				1200/modeApp.Mode.ditTime,
 				modeApp.Mode.ditTime,
