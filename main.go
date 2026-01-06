@@ -1,4 +1,5 @@
 //go:build nobuild
+
 package main
 
 import (
@@ -360,7 +361,7 @@ func (app *App) SetKeyBinding() error {
 	return nil
 }
 
-func (app *App) Print(s string) {
+func (app *App) addText(s string) {
 	if app.gui == nil {
 		fmt.Print(s)
 		return
@@ -565,6 +566,8 @@ func main() {
 			Fname:     *filter,
 		},
 	}
+
+	app.DecoderApp.AddText = app.addText
 
 	if app.Reader == nil {
 		log.Fatal("No audio selected")
