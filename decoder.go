@@ -582,11 +582,26 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 
 	noiseFloor := percentile(envelope, noiseFloorPct)
 	signalRef := percentile(envelope, 95)
+	snr := signalRef - noiseFloor
 
 	// Apply Noise Gate (Squelch)
-	// If the high-percentile signal is below the noise gate, ignore the entire buffer
-	if signalRef < noiseGate {
-		return nil
+	// If the high-percentile signal is below the noise gate, or SNR is too low,
+	// treat the entire buffer as silence to preserve gaps.
+	snrEps := noiseGate * 0.25
+	if snrEps < 0.02 {
+		snrEps = 0.02
+	}
+	if signalRef < noiseGate || snr < snrEps {
+		// Treat as full-buffer silence to preserve word/character gaps across chunks.
+		return []ToneSegment{{
+			Type:      Silence,
+			StartTime: 0,
+			EndTime:   float64(len(buf.Data)) / float64(sampleRate),
+			StartIdx:  0,
+			EndIdx:    len(buf.Data) - 1,
+			Duration:  float64(len(buf.Data)) / float64(sampleRate),
+			Magnitude: 0,
+		}}
 	}
 
 	// Threshold is a percentage between noise floor and strong signal level.
@@ -602,8 +617,8 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 
 	// Use hysteresis: higher threshold to start, lower to continue
 	startThreshold := threshold
-	// End threshold relaxes toward the noise floor to reduce chatter
-	endThreshold := noiseFloor + (startThreshold-noiseFloor)*0.6
+	// End threshold closer to start threshold to end tones sooner in clean signals.
+	endThreshold := noiseFloor + (startThreshold-noiseFloor)*0.8
 	minDuration := ditTime(wpm) / 5 // minimum duration to consider a valid tone. Under this is likely noise
 	maxEnv := signalRef
 	if maxEnv == 0 {
@@ -1377,16 +1392,25 @@ func (app *DecoderApp) MainLoop() {
 		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate, app.NoiseFloorPct)
 
 		if prevTone != nil {
+			// Merge consecutive silences across buffers to avoid fragmentation.
+			if len(toneSegments) > 0 && prevTone.Type == Silence && toneSegments[0].Type == Silence {
+				toneSegments[0].StartIdx = prevTone.StartIdx
+				toneSegments[0].Duration += prevTone.Duration
+				prevTone = nil
+			}
+
 			if len(toneSegments) == 0 { // can this still happen ?
 				continue
 			}
 
-			if prevTone.Type == toneSegments[0].Type {
+			if prevTone != nil && prevTone.Type == toneSegments[0].Type {
 				// merge
 				toneSegments[0].StartIdx = prevTone.StartIdx
 				toneSegments[0].Duration += prevTone.Duration
 			} else {
-				toneSegments = append([]ToneSegment{*prevTone}, toneSegments...)
+				if prevTone != nil {
+					toneSegments = append([]ToneSegment{*prevTone}, toneSegments...)
+				}
 			}
 
 			prevTone = nil

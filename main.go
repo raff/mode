@@ -199,7 +199,7 @@ func (app *App) SetKeyBinding() error {
 	}
 
 	//
-	// Farnsworth timing up/down: T / t
+	// Farnsworth timing up/down: S / s
 	//
 
 	fwpmUp := func(g *gocui.Gui, v *gocui.View) error {
