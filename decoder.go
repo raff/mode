@@ -51,6 +51,60 @@ type Biquad struct {
 	x, y [2]float64
 }
 
+// BiquadCascade chains multiple biquads to increase filter order/slope.
+// Useful for tighter bandpass filtering in noisy environments.
+type BiquadCascade struct {
+	biquads []*Biquad
+}
+
+func NewBandpassCascade(sampleRate, center, bandwidth float64, stages int) *BiquadCascade {
+	if stages < 1 {
+		stages = 1
+	}
+
+	qs := make([]float64, stages)
+	for i := 0; i < stages; i++ {
+		qs[i] = 1.0
+	}
+
+	// Butterworth-ish Q distribution (approx) to keep passband flat.
+	// Precomputed for small orders to avoid complex math; fallback to Q=1.
+	switch stages {
+	case 1:
+		qs = []float64{0.7071}
+	case 2: // 4th order
+		qs = []float64{0.5412, 1.3065}
+	case 3: // 6th order
+		qs = []float64{0.5176, 0.7071, 1.9319}
+	case 4: // 8th order
+		qs = []float64{0.5098, 0.6013, 0.9000, 2.5629}
+	}
+
+	biquads := make([]*Biquad, 0, stages)
+	for i := 0; i < stages; i++ {
+		q := qs[i]
+		bw := center / q
+		if bw <= 0 {
+			bw = bandwidth
+		}
+		// Use requested bandwidth as a minimum to avoid overly narrow filters.
+		if bw < bandwidth {
+			bw = bandwidth
+		}
+		biquads = append(biquads, NewBandpass(sampleRate, center, bw))
+	}
+
+	return &BiquadCascade{biquads: biquads}
+}
+
+func (c *BiquadCascade) Filter(x float64) float64 {
+	y := x
+	for _, b := range c.biquads {
+		y = b.Filter(y)
+	}
+	return y
+}
+
 func NewBandpass(sampleRate, center, bandwidth float64) *Biquad {
 	Q := center / bandwidth
 	omega := 2 * math.Pi * center / sampleRate
@@ -116,7 +170,8 @@ func (f *Biquad) Filter(x float64) float64 {
 func Denoise(buf *audio.FloatBuffer, low, high float64) {
 	center := (low + high) / 2
 	bw := high - low
-	bpf := NewBandpass(float64(buf.Format.SampleRate), center, bw)
+	// Use a 4th-order bandpass (2 biquads) for better noise rejection.
+	bpf := NewBandpassCascade(float64(buf.Format.SampleRate), center, bw, 2)
 	for i, s := range buf.Data {
 		buf.Data[i] = bpf.Filter(s)
 	}
