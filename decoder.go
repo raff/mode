@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"math/cmplx"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -514,47 +515,85 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate float64) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate, noiseFloorPct float64) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
-	// Calculate envelope with window size appropriate for the sample rate
-	// For Morse code, typical dot duration is 50-100ms, so we use ~10ms window
-	windowSize := sampleRate / 100 // 10ms window
+	// Calculate envelope windows relative to WPM (dit length).
+	// Typical choice: RMS window ~ dit/4, smoothing ~ dit/8.
+	ditSec := ditTime(wpm)
+	windowSize := int(float64(sampleRate) * ditSec / 4.0)
 	if windowSize < 10 {
 		windowSize = 10
+	}
+	// Keep window size within a reasonable range to avoid extreme values.
+	if windowSize > sampleRate/5 { // max 200ms
+		windowSize = sampleRate / 5
 	}
 
 	envelope := ComputeEnvelope(buf.Data, windowSize)
 
 	// Smooth the envelope to reduce noise
-	smoothWindowSize := sampleRate / 200 // 5ms smoothing
+	smoothWindowSize := int(float64(sampleRate) * ditSec / 8.0)
 	if smoothWindowSize < 5 {
 		smoothWindowSize = 5
 	}
+	if smoothWindowSize > sampleRate/10 { // max 100ms
+		smoothWindowSize = sampleRate / 10
+	}
 	envelope = SmoothSignal(envelope, smoothWindowSize)
 
-	// Calculate adaptive threshold
-	// Find the maximum and minimum envelope values
-	maxEnv := 0.0
-	minEnv := envelope[0]
-	for _, v := range envelope {
-		if v > maxEnv {
-			maxEnv = v
-		}
-		if v < minEnv {
-			minEnv = v
-		}
-	}
-
-	// Apply Noise Gate (Squelch)
-	// If the maximum signal is below the noise gate, ignore the entire buffer
-	if maxEnv < noiseGate {
+	if len(envelope) == 0 {
 		return nil
 	}
 
-	// Threshold is a percentage between min and max
-	threshold := minEnv + (maxEnv-minEnv)*thresholdRatio
-	//fmt.Printf("Envelope range: %.6f to %.6f, threshold: %.6f\n", minEnv, maxEnv, threshold)
+	// Calculate adaptive threshold using robust percentiles.
+	// noiseFloor uses a lower percentile to avoid spikes; signalRef uses a high percentile.
+	percentile := func(data []float64, p float64) float64 {
+		if len(data) == 0 {
+			return 0
+		}
+		if p <= 0 {
+			p = 0
+		}
+		if p >= 100 {
+			p = 100
+		}
+		cp := make([]float64, len(data))
+		copy(cp, data)
+		sort.Float64s(cp)
+		if len(cp) == 1 {
+			return cp[0]
+		}
+		pos := (p / 100.0) * float64(len(cp)-1)
+		i := int(pos)
+		if i >= len(cp)-1 {
+			return cp[len(cp)-1]
+		}
+		frac := pos - float64(i)
+		return cp[i]*(1-frac) + cp[i+1]*frac
+	}
+
+	if noiseFloorPct <= 0 {
+		noiseFloorPct = 20
+	}
+	if noiseFloorPct > 80 {
+		noiseFloorPct = 80
+	}
+
+	noiseFloor := percentile(envelope, noiseFloorPct)
+	signalRef := percentile(envelope, 95)
+
+	// Apply Noise Gate (Squelch)
+	// If the high-percentile signal is below the noise gate, ignore the entire buffer
+	if signalRef < noiseGate {
+		return nil
+	}
+
+	// Threshold is a percentage between noise floor and strong signal level.
+	if signalRef < noiseFloor {
+		signalRef = noiseFloor
+	}
+	threshold := noiseFloor + (signalRef-noiseFloor)*thresholdRatio
 
 	// Detect tone segments using hysteresis thresholding
 	var segments []ToneSegment
@@ -563,8 +602,13 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 
 	// Use hysteresis: higher threshold to start, lower to continue
 	startThreshold := threshold
-	endThreshold := threshold * 0.8
+	// End threshold relaxes toward the noise floor to reduce chatter
+	endThreshold := noiseFloor + (startThreshold-noiseFloor)*0.6
 	minDuration := ditTime(wpm) / 5 // minimum duration to consider a valid tone. Under this is likely noise
+	maxEnv := signalRef
+	if maxEnv == 0 {
+		maxEnv = 1
+	}
 
 	addTone := func(start, end int, ttype ToneType, mag, minDur float64) bool {
 		if start < 0 || end <= start {
@@ -1163,12 +1207,13 @@ type DecoderApp struct {
 	Wait bool // wait for more inputs
 	mu   sync.Mutex
 
-	Reader    *AudioReader
-	Player    *AudioWriter
-	Mode      *MorseDecoder
-	Threshold int
-	Bandwidth float64 // frequency bandwidth for bandpass filter
-	NoiseGate float64 // minimum amplitude to consider as signal
+	Reader        *AudioReader
+	Player        *AudioWriter
+	Mode          *MorseDecoder
+	Threshold     int
+	Bandwidth     float64 // frequency bandwidth for bandpass filter
+	NoiseGate     float64 // minimum amplitude to consider as signal
+	NoiseFloorPct float64 // percentile for noise floor estimation
 
 	Duration int
 	Tone     int
@@ -1305,7 +1350,7 @@ func (app *DecoderApp) MainLoop() {
 		}
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate)
+		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate, app.NoiseFloorPct)
 
 		if prevTone != nil {
 			if len(toneSegments) == 0 { // can this still happen ?

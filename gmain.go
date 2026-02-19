@@ -353,6 +353,7 @@ func main() {
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
+	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
 	filter := flag.String("filter", "bp", "apply bandpass filter (bp), audio peak filter (apf), or no filter (none)")
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
@@ -366,6 +367,12 @@ func main() {
 	}
 	if *threshold > 100 {
 		*threshold = 100
+	}
+	if *noisePct < 1 {
+		*noisePct = 1
+	}
+	if *noisePct > 80 {
+		*noisePct = 80
 	}
 	if *st < 1 {
 		*st = 1
@@ -646,15 +653,16 @@ func main() {
 	modeApp = DecoderApp{
 		Wait: true,
 
-		Bandwidth: *bandwidth,
-		Threshold: *threshold,
-		NoiseGate: *noiseGate,
-		MinFreq:   *minFreq,
-		MaxFreq:   *maxFreq,
-		Reader:    reader,
-		Player:    player,
-		Mode:      NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
-		Filter:    af,
+		Bandwidth:     *bandwidth,
+		Threshold:     *threshold,
+		NoiseGate:     *noiseGate,
+		NoiseFloorPct: *noisePct,
+		MinFreq:       *minFreq,
+		MaxFreq:       *maxFreq,
+		Reader:        reader,
+		Player:        player,
+		Mode:          NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
+		Filter:        af,
 		SetStatus: func(s string) {
 			fyne.Do(func() {
 				statusLabel.SetText(s)
