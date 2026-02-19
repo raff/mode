@@ -1215,9 +1215,13 @@ type DecoderApp struct {
 	NoiseGate     float64 // minimum amplitude to consider as signal
 	NoiseFloorPct float64 // percentile for noise floor estimation
 
-	Duration int
-	Tone     int
-	Mag      float64
+	Duration        int
+	Tone            int
+	Mag             float64
+	prevFreq        float64
+	prevMag         float64
+	FreqSmoothAlpha float64
+	FreqJumpFactor  float64
 
 	Mute        bool
 	Filter      AudioFilter
@@ -1319,6 +1323,26 @@ func (app *DecoderApp) MainLoop() {
 		// Automatically detect the Morse code tone frequency
 		magnitudes, hammingSum := ComputeSpectrum(floatBuf.Data, floatBuf.Format.SampleRate)
 		centerFreq, magnitude := DetectDominantFrequency(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.MinFreq, app.MaxFreq)
+		// Smooth frequency tracking to reduce jitter and false jumps.
+		if app.prevFreq > 0 {
+			alpha := app.FreqSmoothAlpha
+			if alpha <= 0 || alpha > 1 {
+				alpha = 0.2
+			}
+			jumpFactor := app.FreqJumpFactor
+			if jumpFactor <= 0 {
+				jumpFactor = 0.5
+			}
+			jump := math.Abs(centerFreq - app.prevFreq)
+			// If jump is large and not strongly supported by magnitude, keep previous.
+			if jump > app.Bandwidth*jumpFactor && magnitude < app.prevMag*1.1 {
+				centerFreq = app.prevFreq
+			} else {
+				centerFreq = app.prevFreq*(1-alpha) + centerFreq*alpha
+			}
+		}
+		app.prevFreq = centerFreq
+		app.prevMag = magnitude
 		app.Spectrogram = Spectrogram(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.MinFreq, app.MaxFreq, true)
 
 		app.Tone = int(centerFreq)
