@@ -514,12 +514,44 @@ func SmoothSignal(data []float64, windowSize int) []float64 {
 	return smoothed
 }
 
+// MedianFilter applies a sliding-window median filter.
+func MedianFilter(data []float64, windowSize int) []float64 {
+	if windowSize < 3 {
+		return data
+	}
+	if windowSize%2 == 0 {
+		windowSize++
+	}
+
+	out := make([]float64, len(data))
+	half := windowSize / 2
+	tmp := make([]float64, 0, windowSize)
+
+	for i := range data {
+		start := i - half
+		if start < 0 {
+			start = 0
+		}
+		end := i + half + 1
+		if end > len(data) {
+			end = len(data)
+		}
+
+		tmp = tmp[:0]
+		tmp = append(tmp, data[start:end]...)
+		sort.Float64s(tmp)
+		out[i] = tmp[len(tmp)/2]
+	}
+
+	return out
+}
+
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
 func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate, noiseFloorPct float64) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope windows relative to WPM (dit length).
-	// Typical choice: RMS window ~ dit/4, smoothing ~ dit/8.
+	// Typical choice: window ~ dit/4, smoothing ~ dit/8.
 	ditSec := ditTime(wpm)
 	windowSize := int(float64(sampleRate) * ditSec / 4.0)
 	if windowSize < 10 {
@@ -539,6 +571,13 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	}
 	if smoothWindowSize > sampleRate/10 { // max 100ms
 		smoothWindowSize = sampleRate / 10
+	}
+	medianWindow := smoothWindowSize / 2
+	if medianWindow > 11 {
+		medianWindow = 11
+	}
+	if medianWindow >= 3 {
+		envelope = MedianFilter(envelope, medianWindow)
 	}
 	envelope = SmoothSignal(envelope, smoothWindowSize)
 
@@ -591,7 +630,7 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	if snrEps < 0.02 {
 		snrEps = 0.02
 	}
-	if signalRef < noiseGate || snr < snrEps {
+	if signalRef < noiseGate && snr < snrEps {
 		// Treat as full-buffer silence to preserve word/character gaps across chunks.
 		return []ToneSegment{{
 			Type:      Silence,
@@ -620,6 +659,9 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	// End threshold closer to start threshold to end tones sooner in clean signals.
 	endThreshold := noiseFloor + (startThreshold-noiseFloor)*0.8
 	minDuration := ditTime(wpm) / 5 // minimum duration to consider a valid tone. Under this is likely noise
+	if minDuration < 0.01 {
+		minDuration = 0.01
+	}
 	maxEnv := signalRef
 	if maxEnv == 0 {
 		maxEnv = 1
@@ -928,11 +970,66 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 		dahThresh = int(float64(dtime*3) * d.dt)
 	}
 
+	// Optional clustering for dit/dah durations using 2-means.
+	// If we have enough tone samples in this batch, derive a split threshold.
+	clusterThresh := 0
+	{
+		var durs []float64
+		for _, seg := range segments {
+			if seg.Type == Sound {
+				durs = append(durs, seg.Duration*1000)
+			}
+		}
+		if len(durs) >= 4 {
+			minV, maxV := durs[0], durs[0]
+			for _, v := range durs[1:] {
+				if v < minV {
+					minV = v
+				}
+				if v > maxV {
+					maxV = v
+				}
+			}
+			c1, c2 := minV, maxV
+			for iter := 0; iter < 8; iter++ {
+				var s1, s2 float64
+				var n1, n2 int
+				for _, v := range durs {
+					if math.Abs(v-c1) < math.Abs(v-c2) {
+						s1 += v
+						n1++
+					} else {
+						s2 += v
+						n2++
+					}
+				}
+				if n1 > 0 {
+					c1 = s1 / float64(n1)
+				}
+				if n2 > 0 {
+					c2 = s2 / float64(n2)
+				}
+			}
+			if c1 > c2 {
+				c1, c2 = c2, c1
+			}
+			// Only trust clustering if centers are separated enough.
+			if c2-c1 > float64(ditThresh)/2 {
+				clusterThresh = int((c1 + c2) / 2)
+			}
+		}
+	}
+
 	for _, seg := range segments {
 		durMs := int(seg.Duration * 1000) // Convert to milliseconds
 
 		switch seg.Type {
 		case Silence:
+			// Use observed dit timing for gap classification when available.
+			ditObs := d.ditTime
+			if ditObs <= 0 {
+				ditObs = dtime
+			}
 			if durMs > int(float64(stime)*3.5) { // 7
 				d.wSpace = (d.wSpace + durMs) / 2
 
@@ -957,7 +1054,7 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 			if d.minToneMag > 0 && seg.Magnitude < d.minToneMag {
 				continue
 			}
-			if durMs > dahThresh { // 3
+			if (clusterThresh > 0 && durMs > clusterThresh) || (clusterThresh == 0 && durMs > dahThresh) { // 3
 				// Dah - exponential moving average
 				d.dahTime = (d.dahTime + durMs) / 2
 
@@ -1357,7 +1454,6 @@ func (app *DecoderApp) Statusf(s string, args ...any) {
 func (app *DecoderApp) MainLoop() {
 	var toneSegments []ToneSegment
 	var prevTone *ToneSegment
-
 	// Threshold ratio: 0.3 means 30% above the minimum envelope value
 	// Adjust this value if detection is too sensitive (lower it) or misses tones (raise it)
 
