@@ -176,7 +176,7 @@ func (app *App) SetKeyBinding() error {
 
 	wpmUp := func(g *gocui.Gui, v *gocui.View) error {
 		if app.Mode.wpm < 50 {
-			app.Mode.wpm++
+			app.Mode.setWpm(app.Mode.wpm + 1)
 		}
 
 		return nil
@@ -184,7 +184,7 @@ func (app *App) SetKeyBinding() error {
 
 	wpmDown := func(g *gocui.Gui, v *gocui.View) error {
 		if app.Mode.wpm > 1 {
-			app.Mode.wpm--
+			app.Mode.setWpm(app.Mode.wpm - 1)
 		}
 
 		return nil

@@ -511,7 +511,7 @@ func main() {
 
 	// Create a numeric stepper widget (min: 0, max: 100, initial: 50)
 	wpmStepper := NewNumericStepper(5, 50, *wpm, 1, func(value int) {
-		modeApp.Mode.wpm = value
+		modeApp.Mode.setWpm(value)
 
 		fwpmStepper.SetValue(modeApp.Mode.getFwpm())
 	})

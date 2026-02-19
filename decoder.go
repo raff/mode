@@ -806,6 +806,24 @@ func NewMorseDecoder(wpm, fwpm int, dt float64) *MorseDecoder {
 	}
 }
 
+// ResetTiming resets adaptive timing/magnitude state after speed changes.
+func (d *MorseDecoder) ResetTiming() {
+	dtime := ditTimeMs(d.wpm)
+	stime := spaceTimeMs(d.wpm, d.fwpm)
+	d.ditTime = dtime * 1
+	d.dahTime = dtime * 3
+	d.mSpace = dtime * 1
+	d.chSpace = stime * 3
+	d.wSpace = stime * 7
+	d.tmag = 0
+	d.smag = 0
+	d.minToneMag = 0
+	d.code = ""
+	if d.cm != nil {
+		d.cm = d.cm[:0]
+	}
+}
+
 func (d *MorseDecoder) Flush() string {
 	if d.code == "" {
 		return ""
@@ -857,6 +875,18 @@ func (d *MorseDecoder) setFwpm(v int) {
 	}
 
 	d.fwpm = v - d.wpm
+	d.ResetTiming()
+}
+
+func (d *MorseDecoder) setWpm(v int) {
+	if v <= 0 {
+		return
+	}
+	d.wpm = v
+	if d.fwpm > d.wpm {
+		d.fwpm = 0
+	}
+	d.ResetTiming()
 }
 
 func (d *MorseDecoder) deCode(code string) string {
