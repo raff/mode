@@ -740,6 +740,8 @@ type MorseDecoder struct {
 	tmag, smag float64
 
 	cm []byte
+
+	minToneMag float64
 }
 
 func NewMorseDecoder(wpm, fwpm int, dt float64) *MorseDecoder {
@@ -855,6 +857,38 @@ var maxSpeed int = ditTimeMs(50)
 func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	var text string
 
+	// Coalesce consecutive segments of the same type and recompute duration from times.
+	if len(segments) > 1 {
+		coalesced := make([]ToneSegment, 0, len(segments))
+		last := segments[0]
+		for i := 1; i < len(segments); i++ {
+			cur := segments[i]
+			if cur.Type == last.Type {
+				if cur.StartTime < last.StartTime || last.StartTime == 0 {
+					last.StartTime = cur.StartTime
+				}
+				if cur.EndTime > last.EndTime {
+					last.EndTime = cur.EndTime
+				}
+				if cur.EndIdx > last.EndIdx {
+					last.EndIdx = cur.EndIdx
+				}
+				if cur.StartIdx < last.StartIdx || last.StartIdx == 0 {
+					last.StartIdx = cur.StartIdx
+				}
+				last.Duration = last.EndTime - last.StartTime
+				if cur.Magnitude > last.Magnitude {
+					last.Magnitude = cur.Magnitude
+				}
+				continue
+			}
+			coalesced = append(coalesced, last)
+			last = cur
+		}
+		coalesced = append(coalesced, last)
+		segments = coalesced
+	}
+
 	/*
 		dtime := min(ditTimeMs(d.wpm), d.ditTime)
 		if dtime > minSpeed {
@@ -874,19 +908,39 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 	dtime := ditTimeMs(d.wpm)
 	stime := spaceTimeMs(d.wpm, d.fwpm)
 
+	// Adaptive thresholds based on observed timings (moving averages).
+	// Fall back to configured WPM if estimates are not yet stable.
+	ditRef := d.ditTime
+	if ditRef <= 0 {
+		ditRef = dtime
+	}
+	dahRef := d.dahTime
+	if dahRef <= 0 {
+		dahRef = dtime * 3
+	}
+
+	ditThresh := int(float64(ditRef) * d.dt)
+	if ditThresh < int(float64(dtime)*d.dt) {
+		ditThresh = int(float64(dtime) * d.dt)
+	}
+	dahThresh := int(float64(dahRef) * d.dt)
+	if dahThresh < int(float64(dtime*3)*d.dt) {
+		dahThresh = int(float64(dtime*3) * d.dt)
+	}
+
 	for _, seg := range segments {
 		durMs := int(seg.Duration * 1000) // Convert to milliseconds
 
 		switch seg.Type {
 		case Silence:
-			if durMs > 4*stime { // 7
+			if durMs > int(float64(stime)*3.5) { // 7
 				d.wSpace = (d.wSpace + durMs) / 2
 
 				text += d.deCode(d.code) + " "
 				d.code = ""
 
 				d.cm = d.cm[:0]
-			} else if durMs > 2*stime { // 3
+			} else if durMs > int(float64(stime)*1.6) { // 3
 				d.chSpace = (d.chSpace + durMs) / 2
 
 				text += d.deCode(d.code)
@@ -899,13 +953,17 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 			d.smag = (d.smag + seg.Magnitude) / 2
 		case Sound:
-			if durMs > int(float64(dtime*3)*d.dt) { // 3
+			// Adaptive magnitude gate to reject weak/false tone segments.
+			if d.minToneMag > 0 && seg.Magnitude < d.minToneMag {
+				continue
+			}
+			if durMs > dahThresh { // 3
 				// Dah - exponential moving average
 				d.dahTime = (d.dahTime + durMs) / 2
 
 				d.code += "-"
 				d.cm = append(d.cm, byte(durMs))
-			} else if durMs > int(float64(dtime)*d.dt) { // 1
+			} else if durMs > ditThresh { // 1
 				// Dit - exponential moving average
 				d.ditTime = (d.ditTime + durMs) / 2
 
@@ -917,6 +975,11 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 			d.tmag = (d.tmag + seg.Magnitude) / 2
 		}
+	}
+
+	// Update magnitude gate after processing this batch.
+	if d.tmag > 0 {
+		d.minToneMag = d.tmag * 0.4
 	}
 
 	return text
