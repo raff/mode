@@ -547,7 +547,7 @@ func MedianFilter(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate, noiseFloorPct float64) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate, noiseFloorPct, dither float64) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope windows relative to WPM (dit length).
@@ -622,6 +622,17 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	noiseFloor := percentile(envelope, noiseFloorPct)
 	signalRef := percentile(envelope, 95)
 	snr := signalRef - noiseFloor
+
+	// Add tiny envelope dither to stabilize thresholds on very clean signals.
+	if dither > 0 && noiseFloor < 0.01 {
+		d := dither
+		for i := range envelope {
+			envelope[i] += d
+		}
+		noiseFloor += d
+		signalRef += d
+		snr = signalRef - noiseFloor
+	}
 
 	// Apply Noise Gate (Squelch)
 	// If the high-percentile signal is below the noise gate, or SNR is too low,
@@ -1419,6 +1430,7 @@ type DecoderApp struct {
 	Bandwidth     float64 // frequency bandwidth for bandpass filter
 	NoiseGate     float64 // minimum amplitude to consider as signal
 	NoiseFloorPct float64 // percentile for noise floor estimation
+	Dither        float64 // envelope dither amount (0 disables)
 
 	Duration        int
 	Tone            int
@@ -1578,7 +1590,7 @@ func (app *DecoderApp) MainLoop() {
 		}
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate, app.NoiseFloorPct)
+		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate, app.NoiseFloorPct, app.Dither)
 
 		if prevTone != nil {
 			// Merge consecutive silences across buffers to avoid fragmentation.

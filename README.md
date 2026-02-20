@@ -5,12 +5,17 @@ A morse decoder that can decode audio from a device (i.e. SDR or ham radio) or a
 
 Usage: mode [options] [filename]
 
+Notes:
+- `-dither` can help stabilize decoding on very noisy or very clean signals by adding a tiny envelope offset. Start with `-dither=0.001` and adjust as needed. Use `0` to disable.
+
     -bandwidth float
     	bandwidth for bandpass filter (in Hz) (default 300)
     -buffer int
     	buffer size (in ms) (default 300)
     -device string
     	input audio device (for live decoding)
+    -dither float
+    	envelope dither amount (0 disables)
     -filter string
     	apply bandpass filter (bp), audio peak filter (apf), or no filter (none) (default "bp")
     -fwpm int
@@ -21,6 +26,8 @@ Usage: mode [options] [filename]
     	maximum frequency (in Hz) (default 2000)
     -minfreq float
     	minimum frequency (in Hz) (default 300)
+    -noisepct float
+    	percentile for noise floor estimation (1-80) (default 20)
     -noisegate float
     	Noise gate (squelch) level (0.0-1.0) (default 0.2)
     -noui
@@ -29,6 +36,8 @@ Usage: mode [options] [filename]
     	output audio device (for monitoring)
     -separator
     	output separator '_' between decoded segments
+    -st int
+    	speed threshold (%) to consider a tone valid (default 75)
     -threshold int
     	Ratio (%) between min and max signal level to be considered a valid tone (default 50)
     -wpm int
