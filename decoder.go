@@ -993,6 +993,15 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 
 	// Adaptive thresholds based on observed timings (moving averages).
 	// Fall back to configured WPM if estimates are not yet stable.
+	if d.mSpace > 0 {
+		if d.ditTime > d.mSpace {
+			d.ditTime = d.mSpace
+		}
+		if d.dahTime > d.mSpace*3 {
+			d.dahTime = d.mSpace * 3
+		}
+	}
+
 	ditRef := d.ditTime
 	if ditRef <= 0 {
 		ditRef = dtime
@@ -1067,10 +1076,6 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 		switch seg.Type {
 		case Silence:
 			// Use observed dit timing for gap classification when available.
-			ditObs := d.ditTime
-			if ditObs <= 0 {
-				ditObs = dtime
-			}
 			if durMs > int(float64(stime)*3.5) { // 7
 				d.wSpace = (d.wSpace + durMs) / 2
 
@@ -1306,7 +1311,7 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 
 	if info == nil {
 		for _, d := range devices {
-			if info == nil && strings.HasPrefix(d.Name, dev) {
+			if strings.HasPrefix(d.Name, dev) {
 				info = d
 				break
 			}
