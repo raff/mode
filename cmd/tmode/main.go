@@ -13,6 +13,7 @@ import (
 
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
+	"github.com/raff/mode/internal/session"
 	"github.com/j-04/gocui-component"
 	"github.com/jroimartin/gocui"
 )
@@ -601,7 +602,14 @@ func main() {
 		},
 	}
 
-	app.DecoderApp.AddText = app.addText
+	slog := session.Open()
+	defer slog.Close()
+
+	origAddText := app.addText
+	app.DecoderApp.AddText = func(s string) {
+		slog.Write(s)
+		origAddText(s)
+	}
 
 	if app.Reader == nil {
 		log.Fatal("No audio selected")

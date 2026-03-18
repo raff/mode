@@ -16,6 +16,7 @@ import (
 
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
+	"github.com/raff/mode/internal/session"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -710,6 +711,9 @@ func main() {
 		withBorder(textOut), // middle
 	)
 
+	slog := session.Open()
+	defer slog.Close()
+
 	modeApp = decoder.DecoderApp{
 		Wait: true,
 
@@ -731,6 +735,7 @@ func main() {
 			})
 		},
 		AddText: func(s string) {
+			slog.Write(s)
 			fyne.Do(func() {
 				textOut.Append(s)
 			})
