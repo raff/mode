@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-audio/wav"
-	"github.com/gordonklaus/portaudio"
-
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
 	"github.com/raff/mode/internal/session"
+
+	"github.com/go-audio/wav"
+	"github.com/gordonklaus/portaudio"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -411,7 +411,7 @@ func main() {
 			Filter:    filterName,
 			Squelch:   int(modeApp.SpectralPeakRatio),
 			Bandwidth: modeApp.Bandwidth,
-			MinSNR: modeApp.MinSNR,
+			MinSNR:    modeApp.MinSNR,
 		})
 		if err != nil {
 			log.Printf("config save: %v", err)

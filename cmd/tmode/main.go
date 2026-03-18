@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -9,12 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gordonklaus/portaudio"
-
-	"github.com/go-audio/wav"
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
 	"github.com/raff/mode/internal/session"
+
+	"github.com/go-audio/wav"
+	"github.com/gordonklaus/portaudio"
 	"github.com/j-04/gocui-component"
 	"github.com/jroimartin/gocui"
 )
@@ -644,7 +643,7 @@ func main() {
 			Filter:    *filter,
 			Squelch:   *squelch,
 			Bandwidth: *bandwidth,
-			MinSNR: *noiseGate,
+			MinSNR:    *noiseGate,
 		})
 		if saveErr != nil {
 			log.Printf("config save: %v", saveErr)

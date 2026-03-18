@@ -31,17 +31,17 @@ func decodeWAV(t *testing.T, wavPath string) string {
 	var sb strings.Builder
 
 	app := decoder.DecoderApp{
-		Wait:          false,
-		Bandwidth:     300,
-		Threshold:     50,
-		MinSNR:        0.1,
-		NoiseFloorPct: 20,
-		Dither:        0,
-		MinFreq:       300,
-		MaxFreq:       2000,
-		Reader:        reader,
-		Mode:          decoder.NewMorseDecoder(20, 0, 0.75),
-		Filter:        decoder.Denoise,
+		Wait:              false,
+		Bandwidth:         300,
+		Threshold:         50,
+		MinSNR:            0.1,
+		NoiseFloorPct:     20,
+		Dither:            0,
+		MinFreq:           300,
+		MaxFreq:           2000,
+		Reader:            reader,
+		Mode:              decoder.NewMorseDecoder(20, 0, 0.75),
+		Filter:            decoder.Denoise,
 		SpectralPeakRatio: 3,
 		AddText: func(s string) {
 			sb.WriteString(s)

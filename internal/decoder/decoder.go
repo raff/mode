@@ -1446,8 +1446,8 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 }
 
 func (r *AudioReader) Close() {
-	r.cancel()   // signal any in-progress Read() to stop
-	r.wg.Wait()  // wait for it to finish before touching the stream
+	r.cancel()  // signal any in-progress Read() to stop
+	r.wg.Wait() // wait for it to finish before touching the stream
 
 	if r.Stream != nil {
 		r.Stream.Stop()
@@ -1521,14 +1521,14 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 
 // record taps a decoded buffer into RecordEncoder, if one is set.
 func (r *AudioReader) record(fb *audio.FloatBuffer) {
-        if r.RecordEncoder == nil {
-            return
-        }
-        ib := fb.AsIntBuffer()
-        ib.SourceBitDepth = 32
-        if err := r.RecordEncoder.Write(ib); err != nil {
-            log.Printf("record: write: %v", err)
-        }
+	if r.RecordEncoder == nil {
+		return
+	}
+	ib := fb.AsIntBuffer()
+	ib.SourceBitDepth = 32
+	if err := r.RecordEncoder.Write(ib); err != nil {
+		log.Printf("record: write: %v", err)
+	}
 }
 
 type DecoderApp struct {
@@ -1650,8 +1650,8 @@ func (app *DecoderApp) MainLoop() {
 		}
 
 		if n == 0 {
-			app.Status("No more data")
 			if app.Wait {
+				app.Status("No more data")
 				app.SetReader(nil)
 				continue
 			} else {
@@ -1840,6 +1840,7 @@ func (app *DecoderApp) MainLoop() {
 	// Flush any remaining code
 	if text := app.Mode.Flush(); text != "" {
 		app.Print(text)
+		app.Print("\n")
 	}
 
 	app.Status("Done!")
