@@ -356,7 +356,7 @@ func main() {
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	list := flag.Bool("list", false, "list audio devices")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
-	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
+	noiseGate := flag.Float64("minsnr", 0.1, "Minimum SNR (signal − noise floor, 0.0–1.0) required to process a chunk; 0 disables")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	squelch := flag.Int("squelch", 3, "squelch level (0-5) for spectral peak detection")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
@@ -389,8 +389,8 @@ func main() {
 	if !explicitFlags["bandwidth"] && cfg.Bandwidth != 0 {
 		*bandwidth = cfg.Bandwidth
 	}
-	if !explicitFlags["noisegate"] && cfg.NoiseGate != 0 {
-		*noiseGate = cfg.NoiseGate
+	if !explicitFlags["minsnr"] && cfg.MinSNR != 0 {
+		*noiseGate = cfg.MinSNR
 	}
 
 	// saveConfig persists the current settings. Called on changes.
@@ -411,7 +411,7 @@ func main() {
 			Filter:    filterName,
 			Squelch:   int(modeApp.SpectralPeakRatio),
 			Bandwidth: modeApp.Bandwidth,
-			NoiseGate: modeApp.NoiseGate,
+			MinSNR: modeApp.MinSNR,
 		})
 		if err != nil {
 			log.Printf("config save: %v", err)
@@ -781,7 +781,7 @@ func main() {
 
 		Bandwidth:         *bandwidth,
 		Threshold:         *threshold,
-		NoiseGate:         *noiseGate,
+		MinSNR:            *noiseGate,
 		NoiseFloorPct:     *noisePct,
 		Dither:            *dither,
 		MinFreq:           *minFreq,

@@ -564,7 +564,7 @@ func MedianFilter(data []float64, windowSize int) []float64 {
 }
 
 // DetectMorseTones finds the beginning and end of each Morse tone in the signal
-func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, noiseGate, noiseFloorPct, dither float64) []ToneSegment {
+func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFreq, bandwidth, minSNR, noiseFloorPct, dither float64) []ToneSegment {
 	sampleRate := buf.Format.SampleRate
 
 	// Calculate envelope windows relative to WPM (dit length).
@@ -652,13 +652,10 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 	}
 
 	// Apply Noise Gate (Squelch)
-	// If the high-percentile signal is below the noise gate, or SNR is too low,
-	// treat the entire buffer as silence to preserve gaps.
-	snrEps := noiseGate * 0.25
-	if snrEps < 0.02 {
-		snrEps = 0.02
-	}
-	if signalRef < noiseGate && snr < snrEps {
+	// After NormalizeMax the envelope is always scaled to [0,1], so absolute
+	// amplitude thresholds are useless.  Instead gate on SNR = signalRef − noiseFloor:
+	// pure Gaussian noise SNR ≈ 0.018; real CW chunks SNR ≥ 0.08.  Default minSNR=0.1.
+	if minSNR > 0 && snr < minSNR {
 		// Treat as full-buffer silence to preserve word/character gaps across chunks.
 		return []ToneSegment{{
 			Type:      Silence,
@@ -1488,8 +1485,11 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 
 		// Convert to FloatBuffer
 		fb := r.StreamBuffer.AsFloatBuffer()
-		transforms.NormalizeMax(fb)
+
+		// record if needed
 		r.record(fb)
+
+		transforms.NormalizeMax(fb)
 		return fb, len(r.StreamBuffer.Data), nil
 	}
 
@@ -1512,7 +1512,6 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		// Convert to FloatBuffer
 		fb := r.WavBuffer.AsFloatBuffer()
 		transforms.NormalizeMax(fb)
-		r.record(fb)
 
 		return fb, n, nil
 	}
@@ -1522,12 +1521,14 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 
 // record taps a decoded buffer into RecordEncoder, if one is set.
 func (r *AudioReader) record(fb *audio.FloatBuffer) {
-	if r.RecordEncoder == nil {
-		return
-	}
-	if err := r.RecordEncoder.Write(fb.AsIntBuffer()); err != nil {
-		log.Printf("record: write: %v", err)
-	}
+        if r.RecordEncoder == nil {
+            return
+        }
+        ib := fb.AsIntBuffer()
+        ib.SourceBitDepth = 32
+        if err := r.RecordEncoder.Write(ib); err != nil {
+            log.Printf("record: write: %v", err)
+        }
 }
 
 type DecoderApp struct {
@@ -1542,7 +1543,7 @@ type DecoderApp struct {
 	Mode          *MorseDecoder
 	Threshold     int
 	Bandwidth     float64 // frequency bandwidth for bandpass filter
-	NoiseGate     float64 // minimum amplitude to consider as signal
+	MinSNR        float64 // minimum SNR (signalRef − noiseFloor after NormalizeMax) to process a chunk; 0 disables
 	NoiseFloorPct float64 // percentile for noise floor estimation
 	Dither        float64 // envelope dither amount (0 disables)
 
@@ -1722,7 +1723,7 @@ func (app *DecoderApp) MainLoop() {
 		}
 
 		// Detect Morse code tone segments (beginning and end of each tone)
-		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.NoiseGate, app.NoiseFloorPct, app.Dither)
+		toneSegments = DetectMorseTones(floatBuf, app.Mode.wpm, thresholdRatio, centerFreq, app.Bandwidth, app.MinSNR, app.NoiseFloorPct, app.Dither)
 
 		if prevTone != nil {
 			// Merge consecutive silences across buffers to avoid fragmentation.

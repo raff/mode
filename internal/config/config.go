@@ -13,7 +13,7 @@ type Config struct {
 	Filter    string  `json:"filter,omitempty"`     // filter name: "None", "Bandpass", "APF", "APF 2"
 	Squelch   int     `json:"squelch,omitempty"`    // spectral peak ratio (0–5)
 	Bandwidth float64 `json:"bandwidth,omitempty"`  // bandpass filter bandwidth in Hz
-	NoiseGate float64 `json:"noise_gate,omitempty"` // squelch gate threshold (0.0–1.0)
+	MinSNR    float64 `json:"min_snr,omitempty"`    // minimum SNR (envelope peak − floor) after normalization to gate noise
 }
 
 func configPath() (string, error) {

@@ -1,11 +1,14 @@
 package decoder_test
 
 import (
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/go-audio/audio"
+	"github.com/go-audio/transforms"
 	"github.com/gordonklaus/portaudio"
 	"github.com/raff/mode/internal/decoder"
 )
@@ -31,7 +34,7 @@ func decodeWAV(t *testing.T, wavPath string) string {
 		Wait:          false,
 		Bandwidth:     300,
 		Threshold:     50,
-		NoiseGate:     0.2,
+		MinSNR:        0.1,
 		NoiseFloorPct: 20,
 		Dither:        0,
 		MinFreq:       300,
@@ -48,6 +51,39 @@ func decodeWAV(t *testing.T, wavPath string) string {
 	app.MainLoop()
 
 	return sb.String()
+}
+
+// TestNoiseGateSuppressesNoise verifies that a buffer of pure Gaussian noise
+// produces no Sound segments after NormalizeMax — i.e., the minSNR gate fires.
+// This is a regression test for the bug where the old AND condition
+// (signalRef < noiseGate && snr < snrEps) never fired after NormalizeMax.
+func TestNoiseGateSuppressesNoise(t *testing.T) {
+	const sampleRate = 44100
+	const durationSec = 1.0
+	n := int(sampleRate * durationSec)
+
+	rng := rand.New(rand.NewSource(42))
+	data := make([]float64, n)
+	for i := range data {
+		data[i] = rng.NormFloat64() * 0.1
+	}
+
+	fb := &audio.FloatBuffer{
+		Data:   data,
+		Format: &audio.Format{NumChannels: 1, SampleRate: sampleRate},
+	}
+	transforms.NormalizeMax(fb)
+
+	// Pure Gaussian noise has SNR ≈ 0.018 after NormalizeMax; real CW chunks
+	// have SNR ≥ 0.08.  A threshold of 0.1 sits cleanly in the gap.
+	const minSNR = 0.1
+	segments := decoder.DetectMorseTones(fb, 20, 0.5, 700, 300, minSNR, 20, 0)
+
+	for _, seg := range segments {
+		if seg.Type == decoder.Sound {
+			t.Errorf("noise input produced Sound segment: %v", seg)
+		}
+	}
 }
 
 // TestWAVFixtures decodes every testdata/*.wav and compares against testdata/*.txt.

@@ -18,24 +18,6 @@
 
 ---
 
-## P3 — Parameter Simplification: NoiseGate vs Threshold
-
-**What:** Evaluate whether `NoiseGate` and `Threshold` can be unified into a single parameter inside `DetectMorseTones`.
-
-**Why:** Both are amplitude-based silence gates. `NoiseGate` is a hard per-chunk gate (if overall signal `< noiseGate`, treat chunk as silence). `Threshold` is a relative per-sample crossing level (`noiseFloor + (signalRef − noiseFloor) × ratio`). Exposing both adds cognitive overhead for the operator.
-
-**Pros:** Reduces control surface, simpler UI, fewer parameters to explain.
-
-**Cons:** They do operate at different granularities — unifying them may lose a useful degree of freedom for marginal signals where chunk-level gating and sample-level crossing need independent tuning.
-
-**Context:** `SpectralPeakRatio` (squelch) is NOT redundant with `Threshold` — they operate at different pipeline stages (frequency domain vs. time domain) and cannot replace each other. The overlap is specifically `NoiseGate` + `Threshold`. The test suite (WAV fixtures + accuracy benchmark) should be in place before attempting this so the effect can be measured.
-
-**Effort:** S (human ~2h) / S with CC (~10 min)
-
-**Depends on:** WAV fixture test suite and accuracy benchmark for before/after validation.
-
----
-
 ## P3 — Session Replay / Debug Mode
 
 **What:** Given a WAV file and optionally a session log, replay the decode with `-verbose` output to understand where decoding diverged from expected.

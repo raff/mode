@@ -96,7 +96,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 		di.DitTime,
 		di.MSpace,
 		di.WSpace,
-		app.NoiseGate,
+		app.MinSNR,
 		app.Threshold,
 		int(app.Bandwidth),
 		int(app.Mag*1000),
@@ -232,16 +232,16 @@ func (app *App) SetKeyBinding() error {
 	//
 
 	noiseUp := func(g *gocui.Gui, v *gocui.View) error {
-		if app.NoiseGate < 1 {
-			app.NoiseGate += 0.1
+		if app.MinSNR < 1 {
+			app.MinSNR += 0.1
 		}
 
 		return nil
 	}
 
 	noiseDown := func(g *gocui.Gui, v *gocui.View) error {
-		if app.NoiseGate > 0.1 {
-			app.NoiseGate -= 0.1
+		if app.MinSNR > 0.1 {
+			app.MinSNR -= 0.1
 		}
 
 		return nil
@@ -426,7 +426,7 @@ func main() {
 	out := flag.String("play", "", "output audio device (for monitoring)")
 	list := flag.Bool("list", false, "list audio devices")
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
-	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
+	noiseGate := flag.Float64("minsnr", 0.1, "Minimum SNR (signal − noise floor, 0.0–1.0) required to process a chunk; 0 disables")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	squelch := flag.Int("squelch", 3, "squelch level to consider signal present (0 disables)")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
@@ -460,8 +460,8 @@ func main() {
 	if !explicitFlags["bandwidth"] && cfg.Bandwidth != 0 {
 		*bandwidth = cfg.Bandwidth
 	}
-	if !explicitFlags["noisegate"] && cfg.NoiseGate != 0 {
-		*noiseGate = cfg.NoiseGate
+	if !explicitFlags["minsnr"] && cfg.MinSNR != 0 {
+		*noiseGate = cfg.MinSNR
 	}
 
 	if *threshold < 1 {
@@ -591,7 +591,7 @@ func main() {
 		DecoderApp: decoder.DecoderApp{
 			Bandwidth:         *bandwidth,
 			Threshold:         *threshold,
-			NoiseGate:         *noiseGate,
+			MinSNR:            *noiseGate,
 			NoiseFloorPct:     *noisePct,
 			Dither:            *dither,
 			MinFreq:           *minFreq,
@@ -644,7 +644,7 @@ func main() {
 			Filter:    *filter,
 			Squelch:   *squelch,
 			Bandwidth: *bandwidth,
-			NoiseGate: *noiseGate,
+			MinSNR: *noiseGate,
 		})
 		if saveErr != nil {
 			log.Printf("config save: %v", saveErr)
