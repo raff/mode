@@ -14,6 +14,7 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 
+	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
 
 	"fyne.io/fyne/v2"
@@ -366,6 +367,54 @@ func main() {
 
 	flag.Parse()
 
+	// Load saved config and apply defaults for flags not provided on the CLI.
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Printf("config load: %v", cfgErr)
+	}
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+	if !explicitFlags["device"] && cfg.Device != "" {
+		*dev = cfg.Device
+	}
+	if !explicitFlags["filter"] && cfg.Filter != "" {
+		*filter = cfg.Filter
+	}
+	if !explicitFlags["squelch"] && cfg.Squelch != 0 {
+		*squelch = cfg.Squelch
+	}
+	if !explicitFlags["bandwidth"] && cfg.Bandwidth != 0 {
+		*bandwidth = cfg.Bandwidth
+	}
+	if !explicitFlags["noisegate"] && cfg.NoiseGate != 0 {
+		*noiseGate = cfg.NoiseGate
+	}
+
+	// saveConfig persists the current settings. Called on changes.
+	// modeApp is declared here so saveConfig can close over it; the struct is
+	// assigned later (after the Fyne UI is wired up).
+	var modeApp decoder.DecoderApp
+	saveConfig := func() {
+		dev := ""
+		if modeApp.Reader != nil {
+			dev = modeApp.Reader.Id
+		}
+		filterName := *filter
+		if modeApp.Filter == nil {
+			filterName = "None"
+		}
+		err := config.Save(config.Config{
+			Device:    dev,
+			Filter:    filterName,
+			Squelch:   int(modeApp.SpectralPeakRatio),
+			Bandwidth: modeApp.Bandwidth,
+			NoiseGate: modeApp.NoiseGate,
+		})
+		if err != nil {
+			log.Printf("config save: %v", err)
+		}
+	}
+
 	if *threshold < 1 {
 		*threshold = 1
 	}
@@ -477,8 +526,6 @@ func main() {
 		*filter = "None"
 	}
 
-	var modeApp decoder.DecoderApp
-
 	// Create a new application
 	myApp := app.New()
 	myApp.Settings().SetTheme(&CompactTheme{})
@@ -511,6 +558,7 @@ func main() {
 
 	sqStepper := NewNumericStepper(0, 5, *squelch, 1, func(value int) {
 		modeApp.SpectralPeakRatio = float64(value)
+		saveConfig()
 	})
 
 	fwpmStepper := NewNumericStepper(5, 50, fw, 1, func(value int) {
@@ -538,6 +586,7 @@ func main() {
 		case "APF 2":
 			modeApp.Filter = decoder.AudioPeakFilter(2)
 		}
+		saveConfig()
 	})
 
 	filterSel.SetSelected(*filter)
@@ -588,6 +637,7 @@ func main() {
 
 				// do something with ar
 				modeApp.SetReader(ar)
+				saveConfig()
 			},
 			myWindow,
 		)
@@ -640,6 +690,7 @@ func main() {
 	})
 
 	quitBtn := widget.NewButtonWithIcon("", theme.LogoutIcon(), func() {
+		saveConfig()
 		myApp.Quit()
 	})
 

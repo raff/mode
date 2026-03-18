@@ -11,6 +11,7 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 
+	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
 	"github.com/j-04/gocui-component"
 	"github.com/jroimartin/gocui"
@@ -436,6 +437,29 @@ func main() {
 
 	flag.Parse()
 
+	// Load saved config and apply defaults for flags not provided on the CLI.
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Printf("config load: %v", cfgErr)
+	}
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
+	if !explicitFlags["device"] && cfg.Device != "" {
+		*dev = cfg.Device
+	}
+	if !explicitFlags["filter"] && cfg.Filter != "" {
+		*filter = cfg.Filter
+	}
+	if !explicitFlags["squelch"] && cfg.Squelch != 0 {
+		*squelch = cfg.Squelch
+	}
+	if !explicitFlags["bandwidth"] && cfg.Bandwidth != 0 {
+		*bandwidth = cfg.Bandwidth
+	}
+	if !explicitFlags["noisegate"] && cfg.NoiseGate != 0 {
+		*noiseGate = cfg.NoiseGate
+	}
+
 	if *threshold < 1 {
 		*threshold = 1
 	}
@@ -581,6 +605,21 @@ func main() {
 
 	if app.Reader == nil {
 		log.Fatal("No audio selected")
+	}
+
+	// Persist settings now that all values (including config-loaded defaults) are resolved.
+	if app.Reader != nil {
+		devName := app.Reader.Id
+		saveErr := config.Save(config.Config{
+			Device:    devName,
+			Filter:    *filter,
+			Squelch:   *squelch,
+			Bandwidth: *bandwidth,
+			NoiseGate: *noiseGate,
+		})
+		if saveErr != nil {
+			log.Printf("config save: %v", saveErr)
+		}
 	}
 
 	if g != nil {
