@@ -51,3 +51,39 @@
 **Effort:** M (human ~4h) / S with CC (~15 min)
 
 **Depends on:** `-verbose` flag, session log — both added in overhaul.
+
+---
+
+## P3 — Refactor AudioReader as Interface
+
+**What:** Split `AudioReader` into an interface with two concrete implementations: `WaveReader` (WAV file) and `StreamReader` (PortAudio live stream).
+
+**Why:** `AudioReader` currently mixes two unrelated concerns in one struct — WAV file decoding and PortAudio streaming. Fields like `WavDecoder`/`WavBuffer` are nil for streams, and `Stream`/`StreamBuffer` are nil for files. An interface would make each implementation self-contained and easier to reason about.
+
+**Pros:** Cleaner separation of concerns. Easier to add new sources (e.g., TCP stream, stdin). `Read()` dispatch becomes a simple vtable call instead of `if r.Stream != nil / if r.WavDecoder != nil`.
+
+**Cons:** Requires updating all call sites that set fields directly on `AudioReader` (e.g., `RecordEncoder` would need to move to a wrapper or the interface). Moderate refactor.
+
+**Context:** `AudioReader` is in `internal/decoder/decoder.go`. The interface would live there too. `FromWaveFile` and `FromAudioStream` would return the concrete types (or the interface directly).
+
+**Effort:** M (human ~2h) / S with CC (~15 min)
+
+**Depends on:** Nothing — can be done independently.
+
+---
+
+## P3 — Refactor Config to Handle CLI Flags
+
+**What:** Move the flag-parsing + config-loading + merge logic into `internal/config` so both `gmode` and `tmode` mains call a single `config.LoadWithFlags()` instead of duplicating the `flag.Visit` + merge pattern.
+
+**Why:** Both UIs contain identical boilerplate: declare flags, parse, load config, `flag.Visit` to find explicit flags, merge config defaults into flag values. This is ~25 lines duplicated verbatim.
+
+**Pros:** Single source of truth for flag/config priority logic. Adding a new persisted setting requires one change instead of two.
+
+**Cons:** The config package would need to import `flag` (acceptable) and know about all the flag names that map to config fields (mild coupling).
+
+**Context:** The duplicated block lives at the top of `main()` in both `cmd/gmode/main.go` and `cmd/tmode/main.go`. A `config.Flags` struct + `config.RegisterFlags(fs *flag.FlagSet)` + `config.LoadWithFlags(fs *flag.FlagSet) Config` pattern would clean this up.
+
+**Effort:** S (human ~1h) / S with CC (~10 min)
+
+**Depends on:** Nothing — can be done independently.
