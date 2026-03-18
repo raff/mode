@@ -366,6 +366,7 @@ func main() {
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
+	verbose := flag.Bool("verbose", false, "log segment durations and dit/dah classifications to stderr")
 
 	flag.Parse()
 
@@ -789,6 +790,7 @@ func main() {
 		Player:            player,
 		Mode:              decoder.NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
 		Filter:            af,
+		Verbose:           *verbose,
 		SpectralPeakRatio: 3,
 		SetStatus: func(s string) {
 			fyne.Do(func() {

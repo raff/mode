@@ -1544,6 +1544,7 @@ type DecoderApp struct {
 	SpectralPeakRatio float64 // minimum peak/mean ratio to accept a dominant frequency (0 disables check)
 
 	Mute        bool
+	Verbose     bool // log segment durations and dit/dah classifications to stderr
 	Filter      AudioFilter
 	Fname       string
 	Spectrogram [nBands]rune
@@ -1744,6 +1745,30 @@ func (app *DecoderApp) MainLoop() {
 		}
 
 		toneSegments = toneSegments[:n]
+
+		if app.Verbose {
+			di := app.Mode.GetDisplayInfo()
+			for _, seg := range toneSegments {
+				durMs := int(seg.Duration * 1000)
+				switch seg.Type {
+				case Sound:
+					kind := "dit"
+					if durMs > di.DitTime*2 {
+						kind = "dah"
+					}
+					log.Printf("[verbose] SOUND  %4dms %-3s mag=%.3f", durMs, kind, seg.Magnitude)
+				case Silence:
+					kind := "sig-gap"
+					if durMs > di.MSpace*3 {
+						kind = "char-gap"
+					}
+					if durMs > di.WSpace {
+						kind = "word-gap"
+					}
+					log.Printf("[verbose] SILENT %4dms %-8s", durMs, kind)
+				}
+			}
+		}
 
 		if text := app.Mode.Decode(toneSegments); text != "" {
 			app.Print(text)

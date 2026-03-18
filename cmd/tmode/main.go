@@ -437,6 +437,7 @@ func main() {
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
 	record := flag.String("record", "", "save incoming audio to a WAV file")
+	verbose := flag.Bool("verbose", false, "log segment durations and dit/dah classifications to stderr")
 
 	flag.Parse()
 
@@ -600,6 +601,7 @@ func main() {
 			Mode:              decoder.NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
 			Filter:            af,
 			Fname:             *filter,
+			Verbose:           *verbose,
 			SpectralPeakRatio: float64(*squelch),
 		},
 	}
