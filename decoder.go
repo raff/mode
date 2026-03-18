@@ -284,8 +284,10 @@ func ComputeSpectrum(data []float64, sampleRate int) ([]float64, float64) {
 	return magnitudes, hammingSum
 }
 
-// DetectDominantFrequency finds the dominant frequency in the signal using the pre-computed spectrum
-func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64) (float64, float64) {
+// DetectDominantFrequency finds the dominant frequency in the signal using the pre-computed spectrum.
+// minPeakRatio: if > 0, the peak must exceed this multiple of the mean magnitude in the range;
+// otherwise 0,0 is returned (no valid tone detected — flat/noisy spectrum).
+func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64, minPeakRatio float64) (float64, float64) {
 	if len(magnitudes) == 0 {
 		return 0.0, 0.0
 	}
@@ -318,6 +320,19 @@ func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRat
 		if magnitudes[i] > peakMagnitude {
 			peakMagnitude = magnitudes[i]
 			peakBin = i
+		}
+	}
+
+	// Reject flat/noisy spectra: require peak to be sufficiently above the mean.
+	if minPeakRatio > 0 {
+		var sum float64
+		nBins := maxBin - minBin + 1
+		for i := minBin; i <= maxBin; i++ {
+			sum += magnitudes[i]
+		}
+		mean := sum / float64(nBins)
+		if mean > 0 && peakMagnitude < minPeakRatio*mean {
+			return 0.0, 0.0
 		}
 	}
 
@@ -1437,13 +1452,14 @@ type DecoderApp struct {
 	NoiseFloorPct float64 // percentile for noise floor estimation
 	Dither        float64 // envelope dither amount (0 disables)
 
-	Duration        int
-	Tone            int
-	Mag             float64
-	prevFreq        float64
-	prevMag         float64
-	FreqSmoothAlpha float64
-	FreqJumpFactor  float64
+	Duration          int
+	Tone              int
+	Mag               float64
+	prevFreq          float64
+	prevMag           float64
+	FreqSmoothAlpha   float64
+	FreqJumpFactor    float64
+	SpectralPeakRatio float64 // minimum peak/mean ratio to accept a dominant frequency (0 disables check)
 
 	Mute        bool
 	Filter      AudioFilter
@@ -1543,7 +1559,11 @@ func (app *DecoderApp) MainLoop() {
 
 		// Automatically detect the Morse code tone frequency
 		magnitudes, hammingSum := ComputeSpectrum(floatBuf.Data, floatBuf.Format.SampleRate)
-		centerFreq, magnitude := DetectDominantFrequency(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.MinFreq, app.MaxFreq)
+		peakRatio := app.SpectralPeakRatio
+		//if peakRatio == 0 {
+		//	peakRatio = 3.0 // default: peak must be 3x the mean to be considered a valid CW tone
+		//}
+		centerFreq, magnitude := DetectDominantFrequency(magnitudes, hammingSum, floatBuf.Format.SampleRate, app.MinFreq, app.MaxFreq, peakRatio)
 		// Smooth frequency tracking to reduce jitter and false jumps.
 		if app.prevFreq > 0 {
 			alpha := app.FreqSmoothAlpha

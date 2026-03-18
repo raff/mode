@@ -353,6 +353,7 @@ func main() {
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
+	squelch := flag.Int("squelch", 3, "squelch level (0-5) for spectral peak detection")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
 	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
@@ -506,6 +507,10 @@ func main() {
 		fw = *fwpm
 	}
 
+	sqStepper := NewNumericStepper(0, 5, *squelch, 1, func(value int) {
+		modeApp.SpectralPeakRatio = float64(value)
+	})
+
 	fwpmStepper := NewNumericStepper(5, 50, fw, 1, func(value int) {
 		modeApp.Mode.setFwpm(value)
 	})
@@ -621,6 +626,7 @@ func main() {
 		fileBtn,
 		withBorder(audiospectrum),
 		boldText("Freq:"), freqLabel,
+		boldText("Squelch:"), sqStepper,
 		boldText("Filter:"), filterSel,
 		boldText("WPM:"), wpmStepper,
 		boldText("FWPM:"), fwpmStepper,
@@ -654,17 +660,18 @@ func main() {
 	modeApp = DecoderApp{
 		Wait: true,
 
-		Bandwidth:     *bandwidth,
-		Threshold:     *threshold,
-		NoiseGate:     *noiseGate,
-		NoiseFloorPct: *noisePct,
-		Dither:        *dither,
-		MinFreq:       *minFreq,
-		MaxFreq:       *maxFreq,
-		Reader:        reader,
-		Player:        player,
-		Mode:          NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
-		Filter:        af,
+		Bandwidth:         *bandwidth,
+		Threshold:         *threshold,
+		NoiseGate:         *noiseGate,
+		NoiseFloorPct:     *noisePct,
+		Dither:            *dither,
+		MinFreq:           *minFreq,
+		MaxFreq:           *maxFreq,
+		Reader:            reader,
+		Player:            player,
+		Mode:              NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
+		Filter:            af,
+		SpectralPeakRatio: 3,
 		SetStatus: func(s string) {
 			fyne.Do(func() {
 				statusLabel.SetText(s)

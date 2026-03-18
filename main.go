@@ -427,6 +427,7 @@ func main() {
 	bandwidth := flag.Float64("bandwidth", 300, "bandwidth for bandpass filter (in Hz)")
 	noiseGate := flag.Float64("noisegate", 0.2, "Noise gate (squelch) level (0.0-1.0)")
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
+	squelch := flag.Int("squelch", 3, "squelch level to consider signal present (0 disables)")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
 	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
@@ -562,18 +563,19 @@ func main() {
 		startTime: time.Now(),
 
 		DecoderApp: DecoderApp{
-			Bandwidth:     *bandwidth,
-			Threshold:     *threshold,
-			NoiseGate:     *noiseGate,
-			NoiseFloorPct: *noisePct,
-			Dither:        *dither,
-			MinFreq:       *minFreq,
-			MaxFreq:       *maxFreq,
-			Reader:        reader,
-			Player:        player,
-			Mode:          NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
-			Filter:        af,
-			Fname:         *filter,
+			Bandwidth:         *bandwidth,
+			Threshold:         *threshold,
+			NoiseGate:         *noiseGate,
+			NoiseFloorPct:     *noisePct,
+			Dither:            *dither,
+			MinFreq:           *minFreq,
+			MaxFreq:           *maxFreq,
+			Reader:            reader,
+			Player:            player,
+			Mode:              NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
+			Filter:            af,
+			Fname:             *filter,
+			SpectralPeakRatio: float64(*squelch),
 		},
 	}
 
