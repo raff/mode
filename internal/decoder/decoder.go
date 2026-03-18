@@ -1134,8 +1134,20 @@ func (d *MorseDecoder) Decode(segments []ToneSegment) string {
 			if c1 > c2 {
 				c1, c2 = c2, c1
 			}
-			// Only trust clustering if centers are separated enough.
-			if c2-c1 > float64(ditThresh)/2 {
+			// Only trust clustering if:
+			// 1. Centers are separated enough (absolute gap).
+			// 2. The ratio c2/c1 is in the plausible dit:dah range (~2–5x).
+			//    Pure noise with similar-length bursts has ratio near 1 → reject.
+			// 3. c1 is at least half the nominal dit time.
+			//    Noise spikes are often much shorter than real dits; if c1 is tiny
+			//    (e.g. 18ms vs nominal 60ms) the batch is noise, not Morse.
+			ratio := 0.0
+			if c1 > 0 {
+				ratio = c2 / c1
+			}
+			if c2-c1 > float64(ditThresh)/2 &&
+				ratio >= 2.0 && ratio <= 5.0 &&
+				c1 >= float64(dtime)*0.5 {
 				clusterThresh = int((c1 + c2) / 2)
 			}
 		}
