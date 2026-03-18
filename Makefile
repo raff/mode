@@ -17,26 +17,26 @@ app: MoDe.app
 
 MoDe.app: gmode tmode Icon.png
 	# create Mode.app
-	fyne package -os darwin -exe gmode -icon Icon.png -name MoDe
+	fyne package -os darwin -sourceDir cmd/gmode -exe gmode -icon Icon.png -name MoDe
 	# copy TUI executable, just in case
 	cp tmode MoDe.app/Contents/MacOS/tmode
 	# request permission for using microphone (and other audio inputs)
 	./set-permissions.sh MoDe.app/Contents/Info.plist
 
-gmode: gmain.go decoder.go
-	go build -o gmode gmain.go decoder.go
+gmode: cmd/gmode/main.go internal/decoder/decoder.go
+	go build -o gmode ./cmd/gmode
 
-tmode: main.go decoder.go
-	go build -o tmode main.go decoder.go
+tmode: cmd/tmode/main.go internal/decoder/decoder.go
+	go build -o tmode ./cmd/tmode
 
 clean:
 	rm -rf MoDe.app gmode tmode
 
 gui:
-	go run gmain.go decoder.go $(ARGS)
+	go run ./cmd/gmode $(ARGS)
 
 tui:
-	go run main.go decoder.go $(ARGS)
+	go run ./cmd/tmode $(ARGS)
 
 text:
-	go run main.go decoder.go -noui $(ARGS)
+	go run ./cmd/tmode -noui $(ARGS)

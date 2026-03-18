@@ -1,4 +1,4 @@
-module mode
+module github.com/raff/mode
 
 go 1.25.1
 

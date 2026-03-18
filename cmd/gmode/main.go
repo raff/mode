@@ -14,6 +14,8 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 
+	"github.com/raff/mode/internal/decoder"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -398,7 +400,7 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Println()
 
-		l, err := ListAudioDevices(AudioInOut)
+		l, err := decoder.ListAudioDevices(decoder.AudioInOut)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -426,12 +428,12 @@ func main() {
 		*ssize = 1
 	}
 
-	var reader *AudioReader
-	var player *AudioWriter
+	var reader *decoder.AudioReader
+	var player *decoder.AudioWriter
 	var err error
 
 	if *dev != "" {
-		reader, err = FromAudioStream(*dev, *ssize)
+		reader, err = decoder.FromAudioStream(*dev, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -445,7 +447,7 @@ func main() {
 
 		defer f.Close()
 
-		reader, err = FromWaveFile(f, 1) // *ssize)
+		reader, err = decoder.FromWaveFile(f, 1) // *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -454,28 +456,28 @@ func main() {
 	}
 
 	if *out != "" {
-		player, err = NewAudioWriter(*out, reader.SampleRate, *ssize)
+		player, err = decoder.NewAudioWriter(*out, reader.SampleRate, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	var af AudioFilter
+	var af decoder.AudioFilter
 	switch *filter {
 	case "bp":
 		*filter = "Bandpass"
-		af = Denoise
+		af = decoder.Denoise
 	case "apf":
 		*filter = "APF"
-		af = AudioPeakFilter(1.413)
+		af = decoder.AudioPeakFilter(1.413)
 	case "apf2":
 		*filter = "APF 2"
-		af = AudioPeakFilter(2)
+		af = decoder.AudioPeakFilter(2)
 	default:
 		*filter = "None"
 	}
 
-	var modeApp DecoderApp
+	var modeApp decoder.DecoderApp
 
 	// Create a new application
 	myApp := app.New()
@@ -512,14 +514,14 @@ func main() {
 	})
 
 	fwpmStepper := NewNumericStepper(5, 50, fw, 1, func(value int) {
-		modeApp.Mode.setFwpm(value)
+		modeApp.Mode.SetFwpm(value)
 	})
 
 	// Create a numeric stepper widget (min: 0, max: 100, initial: 50)
 	wpmStepper := NewNumericStepper(5, 50, *wpm, 1, func(value int) {
-		modeApp.Mode.setWpm(value)
+		modeApp.Mode.SetWpm(value)
 
-		fwpmStepper.SetValue(modeApp.Mode.getFwpm())
+		fwpmStepper.SetValue(modeApp.Mode.GetFwpm())
 	})
 
 	filterSel := widget.NewSelect([]string{"None", "Bandpass", "APF", "APF 2"}, func(selected string) {
@@ -528,13 +530,13 @@ func main() {
 			modeApp.Filter = nil
 
 		case "Bandpass":
-			modeApp.Filter = Denoise
+			modeApp.Filter = decoder.Denoise
 
 		case "APF":
-			modeApp.Filter = AudioPeakFilter(1.413)
+			modeApp.Filter = decoder.AudioPeakFilter(1.413)
 
 		case "APF 2":
-			modeApp.Filter = AudioPeakFilter(2)
+			modeApp.Filter = decoder.AudioPeakFilter(2)
 		}
 	})
 
@@ -548,7 +550,7 @@ func main() {
 	textOut.Scroll = container.ScrollVerticalOnly
 
 	deviceBtn := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() {
-		l, err := ListAudioDevices(AudioIn)
+		l, err := decoder.ListAudioDevices(decoder.AudioIn)
 		if err != nil {
 			dialog.ShowError(err, myWindow)
 			return
@@ -578,7 +580,7 @@ func main() {
 
 				modeApp.SetReader(nil)
 
-				ar, err := FromAudioStream(deviceSel.Selected, *ssize)
+				ar, err := decoder.FromAudioStream(deviceSel.Selected, *ssize)
 				if err != nil {
 					dialog.ShowError(err, myWindow)
 					return
@@ -605,7 +607,7 @@ func main() {
 
 			modeApp.SetReader(nil)
 
-			wr, err := FromWaveFile(reader.(io.ReadSeeker), 1)
+			wr, err := decoder.FromWaveFile(reader.(io.ReadSeeker), 1)
 			if err != nil {
 				dialog.ShowError(err, myWindow)
 				return
@@ -657,7 +659,7 @@ func main() {
 		withBorder(textOut), // middle
 	)
 
-	modeApp = DecoderApp{
+	modeApp = decoder.DecoderApp{
 		Wait: true,
 
 		Bandwidth:         *bandwidth,
@@ -669,7 +671,7 @@ func main() {
 		MaxFreq:           *maxFreq,
 		Reader:            reader,
 		Player:            player,
-		Mode:              NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
+		Mode:              decoder.NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
 		Filter:            af,
 		SpectralPeakRatio: 3,
 		SetStatus: func(s string) {
@@ -686,12 +688,13 @@ func main() {
 
 	modeApp.Update = func() {
 		fyne.Do(func() {
+			di := modeApp.Mode.GetDisplayInfo()
 			freqLabel.SetText(fmt.Sprintf("%-3d", modeApp.Tone))
 			calcWpm.SetText(fmt.Sprintf("(%2d) dit:%-2dms sp:%-2d/%-3dms",
-				1200/modeApp.Mode.ditTime,
-				modeApp.Mode.ditTime,
-				modeApp.Mode.mSpace,
-				modeApp.Mode.wSpace))
+				1200/di.DitTime,
+				di.DitTime,
+				di.MSpace,
+				di.WSpace))
 			audiospectrum.SetText(string(modeApp.Spectrogram[:]))
 		})
 	}

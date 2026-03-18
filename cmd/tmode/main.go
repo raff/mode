@@ -1,4 +1,3 @@
-//go:build nobuild
 
 package main
 
@@ -11,12 +10,14 @@ import (
 	"time"
 
 	"github.com/gordonklaus/portaudio"
+
+	"github.com/raff/mode/internal/decoder"
 	"github.com/j-04/gocui-component"
 	"github.com/jroimartin/gocui"
 )
 
 type App struct {
-	DecoderApp
+	decoder.DecoderApp
 
 	gui   *gocui.Gui
 	vinfo *gocui.View
@@ -173,7 +174,7 @@ func (app *App) SetKeyBinding() error {
 
 	wpmUp := func(g *gocui.Gui, v *gocui.View) error {
 		if wpm := app.Mode.GetWpm(); wpm < 50 {
-			app.Mode.setWpm(wpm + 1)
+			app.Mode.SetWpm(wpm + 1)
 		}
 
 		return nil
@@ -181,7 +182,7 @@ func (app *App) SetKeyBinding() error {
 
 	wpmDown := func(g *gocui.Gui, v *gocui.View) error {
 		if wpm := app.Mode.GetWpm(); wpm > 1 {
-			app.Mode.setWpm(wpm - 1)
+			app.Mode.SetWpm(wpm - 1)
 		}
 
 		return nil
@@ -200,16 +201,16 @@ func (app *App) SetKeyBinding() error {
 	//
 
 	fwpmUp := func(g *gocui.Gui, v *gocui.View) error {
-		if v := app.Mode.getFwpm(); v < 50 {
-			app.Mode.setFwpm(v + 1)
+		if v := app.Mode.GetFwpm(); v < 50 {
+			app.Mode.SetFwpm(v + 1)
 		}
 
 		return nil
 	}
 
 	fwpmDown := func(g *gocui.Gui, v *gocui.View) error {
-		if v := app.Mode.getFwpm(); v > 1 {
-			app.Mode.setFwpm(v - 1)
+		if v := app.Mode.GetFwpm(); v > 1 {
+			app.Mode.SetFwpm(v - 1)
 		}
 
 		return nil
@@ -287,20 +288,20 @@ func (app *App) SetKeyBinding() error {
 		switch app.Fname {
 		case "no":
 			app.Fname = "bp"
-			app.Filter = Denoise
+			app.Filter = decoder.Denoise
 		case "bp":
 			app.Fname = "apf"
-			app.Filter = AudioPeakFilter(1.413)
+			app.Filter = decoder.AudioPeakFilter(1.413)
 		case "apf":
 			app.Fname = "apf2"
-			app.Filter = AudioPeakFilter(2)
+			app.Filter = decoder.AudioPeakFilter(2)
 		case "apf2":
 			app.Fname = "no"
 			app.Filter = nil
 		default:
 			// Default to bandpass if unknown
 			app.Fname = "bp"
-			app.Filter = Denoise
+			app.Filter = decoder.Denoise
 		}
 		return nil
 	}
@@ -375,14 +376,14 @@ var (
 	FormCancel = fmt.Errorf("form-cancel")
 )
 
-func guiSelectAudio(ssize int) (reader *AudioReader) {
+func guiSelectAudio(ssize int) (reader *decoder.AudioReader) {
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
 
-	list, err := ListAudioDevices(AudioIn)
+	list, err := decoder.ListAudioDevices(decoder.AudioIn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -391,7 +392,7 @@ func guiSelectAudio(ssize int) (reader *AudioReader) {
 	sel := form.AddSelect("Device:", 8, 40).AddOptions(list...)
 
 	form.AddButton("Select", func(g *gocui.Gui, v *gocui.View) error {
-		reader, err = FromAudioStream(sel.GetSelected(), ssize)
+		reader, err = decoder.FromAudioStream(sel.GetSelected(), ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -469,7 +470,7 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Println()
 
-		l, err := ListAudioDevices(AudioInOut)
+		l, err := decoder.ListAudioDevices(decoder.AudioInOut)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -497,12 +498,12 @@ func main() {
 		*ssize = 1
 	}
 
-	var reader *AudioReader
-	var player *AudioWriter
+	var reader *decoder.AudioReader
+	var player *decoder.AudioWriter
 	var err error
 
 	if *dev != "" {
-		reader, err = FromAudioStream(*dev, *ssize)
+		reader, err = decoder.FromAudioStream(*dev, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -516,7 +517,7 @@ func main() {
 
 		defer f.Close()
 
-		reader, err = FromWaveFile(f, 1) // *ssize)
+		reader, err = decoder.FromWaveFile(f, 1) // *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -527,7 +528,7 @@ func main() {
 	}
 
 	if *out != "" {
-		player, err = NewAudioWriter(*out, reader.SampleRate, *ssize)
+		player, err = decoder.NewAudioWriter(*out, reader.SampleRate, *ssize)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -543,14 +544,14 @@ func main() {
 		defer g.Close()
 	}
 
-	var af AudioFilter
+	var af decoder.AudioFilter
 	switch *filter {
 	case "bp":
-		af = Denoise
+		af = decoder.Denoise
 	case "apf":
-		af = AudioPeakFilter(1.413)
+		af = decoder.AudioPeakFilter(1.413)
 	case "apf2":
-		af = AudioPeakFilter(2)
+		af = decoder.AudioPeakFilter(2)
 	default:
 		*filter = "no"
 	}
@@ -559,7 +560,7 @@ func main() {
 		gui:       g,
 		startTime: time.Now(),
 
-		DecoderApp: DecoderApp{
+		DecoderApp: decoder.DecoderApp{
 			Bandwidth:         *bandwidth,
 			Threshold:         *threshold,
 			NoiseGate:         *noiseGate,
@@ -569,7 +570,7 @@ func main() {
 			MaxFreq:           *maxFreq,
 			Reader:            reader,
 			Player:            player,
-			Mode:              NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
+			Mode:              decoder.NewMorseDecoder(*wpm, *fwpm, float64(*st)/100),
 			Filter:            af,
 			Fname:             *filter,
 			SpectralPeakRatio: float64(*squelch),

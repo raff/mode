@@ -1,4 +1,4 @@
-package main
+package decoder
 
 import (
 	"context"
@@ -936,7 +936,7 @@ func (d *MorseDecoder) GetWpm() int {
 	return d.wpm
 }
 
-func (d *MorseDecoder) getFwpm() int {
+func (d *MorseDecoder) GetFwpm() int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if d.fwpm <= 0 {
@@ -945,7 +945,7 @@ func (d *MorseDecoder) getFwpm() int {
 	return d.fwpm
 }
 
-func (d *MorseDecoder) setFwpm(v int) {
+func (d *MorseDecoder) SetFwpm(v int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if v > d.wpm {
@@ -955,7 +955,7 @@ func (d *MorseDecoder) setFwpm(v int) {
 	d.resetTiming()
 }
 
-func (d *MorseDecoder) setWpm(v int) {
+func (d *MorseDecoder) SetWpm(v int) {
 	if v <= 0 {
 		return
 	}
