@@ -79,28 +79,25 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 	app.vinfo.Clear()
 	app.vinfo.SetOrigin(0, 0)
 
-	fwpm := app.Mode.fwpm
-	if fwpm <= 0 {
-		fwpm += app.Mode.wpm
-	}
+	di := app.Mode.GetDisplayInfo()
 
 	fmt.Fprintf(app.vinfo,
 		"[%v] Tone: %3dhz Filter: %-4s  WPM:%2d/%2d (%2d) dit:%-2dms sp:%-2d/%-3dms  NG:%3.1f  Thr:%2d%%  Bw:%3d  Level:%3d (T:%3d S:%3d)",
 		string(app.Spectrogram[:]),
 		app.Tone,
 		app.Fname,
-		app.Mode.wpm,
-		fwpm,
-		1200/app.Mode.ditTime,
-		app.Mode.ditTime,
-		app.Mode.mSpace,
-		app.Mode.wSpace,
+		di.Wpm,
+		di.Fwpm,
+		1200/di.DitTime,
+		di.DitTime,
+		di.MSpace,
+		di.WSpace,
 		app.NoiseGate,
 		app.Threshold,
 		int(app.Bandwidth),
 		int(app.Mag*1000),
-		int(app.Mode.tmag), // *1000),
-		int(app.Mode.smag), // *1000),
+		int(di.TMag), // *1000),
+		int(di.SMag), // *1000),
 	)
 
 	if app.Player != nil {
@@ -175,16 +172,16 @@ func (app *App) SetKeyBinding() error {
 	//
 
 	wpmUp := func(g *gocui.Gui, v *gocui.View) error {
-		if app.Mode.wpm < 50 {
-			app.Mode.setWpm(app.Mode.wpm + 1)
+		if wpm := app.Mode.GetWpm(); wpm < 50 {
+			app.Mode.setWpm(wpm + 1)
 		}
 
 		return nil
 	}
 
 	wpmDown := func(g *gocui.Gui, v *gocui.View) error {
-		if app.Mode.wpm > 1 {
-			app.Mode.setWpm(app.Mode.wpm - 1)
+		if wpm := app.Mode.GetWpm(); wpm > 1 {
+			app.Mode.setWpm(wpm - 1)
 		}
 
 		return nil

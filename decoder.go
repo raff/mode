@@ -796,6 +796,8 @@ func DetectMorseTones(buf *audio.FloatBuffer, wpm int, thresholdRatio, centerFre
 }
 
 type MorseDecoder struct {
+	mu sync.RWMutex
+
 	code string
 	wpm  int
 	fwpm int
@@ -834,8 +836,8 @@ func NewMorseDecoder(wpm, fwpm int, dt float64) *MorseDecoder {
 	}
 }
 
-// ResetTiming resets adaptive timing/magnitude state after speed changes.
-func (d *MorseDecoder) ResetTiming() {
+// resetTiming resets adaptive timing/magnitude state. Caller must hold mu.Lock().
+func (d *MorseDecoder) resetTiming() {
 	dtime := ditTimeMs(d.wpm)
 	stime := spaceTimeMs(d.wpm, d.fwpm)
 	d.ditTime = dtime * 1
@@ -852,7 +854,16 @@ func (d *MorseDecoder) ResetTiming() {
 	}
 }
 
+// ResetTiming resets adaptive timing/magnitude state after speed changes.
+func (d *MorseDecoder) ResetTiming() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.resetTiming()
+}
+
 func (d *MorseDecoder) Flush() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.code == "" {
 		return ""
 	}
@@ -889,32 +900,72 @@ func spaceTimeMs(wpm, fwpm int) int {
 	return ditTimeMs(wpm)
 }
 
+// DisplayInfo is a consistent snapshot of MorseDecoder state for UI display.
+type DisplayInfo struct {
+	Wpm     int
+	Fwpm    int
+	DitTime int
+	MSpace  int
+	WSpace  int
+	TMag    float64
+	SMag    float64
+}
+
+// GetDisplayInfo returns a consistent snapshot of decoder state for display. Safe to call from any goroutine.
+func (d *MorseDecoder) GetDisplayInfo() DisplayInfo {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	fwpm := d.fwpm
+	if fwpm <= 0 {
+		fwpm += d.wpm
+	}
+	return DisplayInfo{
+		Wpm:     d.wpm,
+		Fwpm:    fwpm,
+		DitTime: d.ditTime,
+		MSpace:  d.mSpace,
+		WSpace:  d.wSpace,
+		TMag:    d.tmag,
+		SMag:    d.smag,
+	}
+}
+
+func (d *MorseDecoder) GetWpm() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.wpm
+}
+
 func (d *MorseDecoder) getFwpm() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	if d.fwpm <= 0 {
 		return d.fwpm + d.wpm
 	}
-
 	return d.fwpm
 }
 
 func (d *MorseDecoder) setFwpm(v int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if v > d.wpm {
 		d.fwpm = 0
 	}
-
 	d.fwpm = v - d.wpm
-	d.ResetTiming()
+	d.resetTiming()
 }
 
 func (d *MorseDecoder) setWpm(v int) {
 	if v <= 0 {
 		return
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.wpm = v
 	if d.fwpm > d.wpm {
 		d.fwpm = 0
 	}
-	d.ResetTiming()
+	d.resetTiming()
 }
 
 func (d *MorseDecoder) deCode(code string) string {
@@ -955,6 +1006,9 @@ var minSpeed int = ditTimeMs(5)
 var maxSpeed int = ditTimeMs(50)
 
 func (d *MorseDecoder) Decode(segments []ToneSegment) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	var text string
 
 	// Coalesce consecutive segments of the same type and recompute duration from times.
