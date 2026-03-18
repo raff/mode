@@ -1349,6 +1349,11 @@ type AudioReader struct {
 	Channels   int
 	SampleSize int
 
+	// RecordEncoder, if set, receives every decoded chunk for WAV recording.
+	// It must be initialised (with matching SampleRate/Channels) before Read is called.
+	// The caller is responsible for calling RecordEncoder.Close() when done.
+	RecordEncoder *wav.Encoder
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -1472,6 +1477,7 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		// Convert to FloatBuffer
 		fb := r.StreamBuffer.AsFloatBuffer()
 		transforms.NormalizeMax(fb)
+		r.record(fb)
 		return fb, len(r.StreamBuffer.Data), nil
 	}
 
@@ -1494,11 +1500,22 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		// Convert to FloatBuffer
 		fb := r.WavBuffer.AsFloatBuffer()
 		transforms.NormalizeMax(fb)
+		r.record(fb)
 
 		return fb, n, nil
 	}
 
 	return nil, 0, fmt.Errorf("no audio source available")
+}
+
+// record taps a decoded buffer into RecordEncoder, if one is set.
+func (r *AudioReader) record(fb *audio.FloatBuffer) {
+	if r.RecordEncoder == nil {
+		return
+	}
+	if err := r.RecordEncoder.Write(fb.AsIntBuffer()); err != nil {
+		log.Printf("record: write: %v", err)
+	}
 }
 
 type DecoderApp struct {

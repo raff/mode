@@ -11,6 +11,7 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 
+	"github.com/go-audio/wav"
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
 	"github.com/raff/mode/internal/session"
@@ -435,6 +436,7 @@ func main() {
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
+	record := flag.String("record", "", "save incoming audio to a WAV file")
 
 	flag.Parse()
 
@@ -613,6 +615,23 @@ func main() {
 
 	if app.Reader == nil {
 		log.Fatal("No audio selected")
+	}
+
+	// Set up WAV recording if requested.
+	if *record != "" {
+		recFile, err := os.OpenFile(*record, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			log.Fatalf("record: open %s: %v", *record, err)
+		}
+		enc := wav.NewEncoder(recFile, app.Reader.SampleRate, 16, app.Reader.Channels, 1)
+		app.Reader.RecordEncoder = enc
+		defer func() {
+			app.Reader.RecordEncoder = nil
+			if err := enc.Close(); err != nil {
+				log.Printf("record: close: %v", err)
+			}
+			recFile.Close()
+		}()
 	}
 
 	// Persist settings now that all values (including config-loaded defaults) are resolved.

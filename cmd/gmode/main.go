@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-audio/wav"
 	"github.com/gordonklaus/portaudio"
 
 	"github.com/raff/mode/internal/config"
@@ -673,10 +674,70 @@ func main() {
 		fd.Show()
 	})
 
+	var recordFile *os.File
+	var recordBtn *widget.Button
+	stopRecording := func() {
+		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
+			enc := modeApp.Reader.RecordEncoder
+			modeApp.Reader.RecordEncoder = nil
+			if err := enc.Close(); err != nil {
+				log.Printf("record close: %v", err)
+			}
+		}
+		if recordFile != nil {
+			recordFile.Close()
+			recordFile = nil
+		}
+		if recordBtn != nil {
+			fyne.Do(func() { recordBtn.SetText("Rec") })
+		}
+	}
+
+	recordBtn = widget.NewButton("Rec", func() {
+		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
+			// Already recording — stop.
+			stopRecording()
+			return
+		}
+
+		fd := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, myWindow)
+				return
+			}
+			if w == nil {
+				return
+			}
+
+			r := modeApp.Reader
+			if r == nil {
+				w.Close()
+				return
+			}
+
+			f, err := os.OpenFile(w.URI().Path(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+			if err != nil {
+				dialog.ShowError(err, myWindow)
+				w.Close()
+				return
+			}
+			w.Close() // Fyne's writer is not needed; we use os.File for io.WriteSeeker
+
+			recordFile = f
+			enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
+			r.RecordEncoder = enc
+			recordBtn.SetText("■ Rec")
+		}, myWindow)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
+		fd.Show()
+	})
+	defer stopRecording()
+
 	// Create the toolbar container
 	toolbar := container.NewHBox(
 		deviceBtn,
 		fileBtn,
+		recordBtn,
 		withBorder(audiospectrum),
 		boldText("Freq:"), freqLabel,
 		boldText("Squelch:"), sqStepper,
