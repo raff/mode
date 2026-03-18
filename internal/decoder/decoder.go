@@ -1603,6 +1603,10 @@ func (app *DecoderApp) MainLoop() {
 	// Threshold ratio: 0.3 means 30% above the minimum envelope value
 	// Adjust this value if detection is too sensitive (lower it) or misses tones (raise it)
 
+	// Verbose state persisted across buffer iterations so gap annotations
+	// correctly reflect sounds that may have been in a previous buffer.
+	var verbAccCode, verbAccWord string
+
 	for {
 		reader := app.GetReader()
 		if reader == nil {
@@ -1748,24 +1752,59 @@ func (app *DecoderApp) MainLoop() {
 
 		if app.Verbose {
 			di := app.Mode.GetDisplayInfo()
+			// Use nominal dit threshold from configured WPM so classification
+			// is stable and doesn't drift with the adaptive timing state.
+			nominalDitMs := ditTimeMs(di.Wpm)
+
+			// verbLine prints a fixed-width line with an optional right-aligned annotation.
+			verbLine := func(body, annotation string) {
+				if annotation == "" {
+					log.Print(body)
+				} else {
+					log.Printf("%-47s %s", body, annotation)
+				}
+			}
+			lookupChar := func(code string) string {
+				if code == "" {
+					return ""
+				}
+				if ch, ok := morseCode[code]; ok {
+					return ch
+				}
+				return "(" + code + ")"
+			}
+			finalizeChar := func() string {
+				ch := lookupChar(verbAccCode)
+				verbAccCode = ""
+				verbAccWord += ch
+				return ch
+			}
+
 			for _, seg := range toneSegments {
 				durMs := int(seg.Duration * 1000)
 				switch seg.Type {
 				case Sound:
 					kind := "dit"
-					if durMs > di.DitTime*2 {
+					symbol := "."
+					if durMs > nominalDitMs*2 {
 						kind = "dah"
+						symbol = "-"
 					}
-					log.Printf("[verbose] SOUND  %4dms %-3s mag=%.3f", durMs, kind, seg.Magnitude)
+					verbAccCode += symbol
+					verbLine(fmt.Sprintf("[verbose] SOUND  %4dms %-3s mag=%.3f", durMs, kind, seg.Magnitude), symbol)
 				case Silence:
-					kind := "sig-gap"
-					if durMs > di.MSpace*3 {
-						kind = "char-gap"
+					switch {
+					case durMs > di.WSpace:
+						finalizeChar()
+						verbLine(fmt.Sprintf("[verbose] SILENT %4dms word-gap", durMs), verbAccWord)
+						log.Print("[verbose]")
+						verbAccWord = ""
+					case durMs > di.MSpace*3:
+						ch := finalizeChar()
+						verbLine(fmt.Sprintf("[verbose] SILENT %4dms char-gap", durMs), ch)
+					default:
+						verbLine(fmt.Sprintf("[verbose] SILENT %4dms sig-gap", durMs), "")
 					}
-					if durMs > di.WSpace {
-						kind = "word-gap"
-					}
-					log.Printf("[verbose] SILENT %4dms %-8s", durMs, kind)
 				}
 			}
 		}
