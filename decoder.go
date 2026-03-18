@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1293,7 +1295,9 @@ type AudioReader struct {
 	Channels   int
 	SampleSize int
 
-	reading bool
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 func FromWaveFile(r io.ReadSeeker, ssize int) (*AudioReader, error) {
@@ -1302,12 +1306,15 @@ func FromWaveFile(r io.ReadSeeker, ssize int) (*AudioReader, error) {
 		return nil, fmt.Errorf("invalid WAV file")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &AudioReader{
 		WavDecoder: decoder,
 		WavBuffer:  audio.IntBuffer{Format: decoder.Format(), Data: make([]int, decoder.Format().SampleRate/ssize)},
 		SampleRate: decoder.Format().SampleRate,
 		Channels:   decoder.Format().NumChannels,
 		SampleSize: ssize,
+		ctx:        ctx,
+		cancel:     cancel,
 	}, nil
 }
 
@@ -1357,6 +1364,7 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 		return nil, fmt.Errorf("start input: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &AudioReader{
 		Id:           info.Name,
 		Stream:       stream,
@@ -1364,13 +1372,14 @@ func FromAudioStream(dev string, ssize int) (*AudioReader, error) {
 		SampleRate:   sampleRate,
 		Channels:     numChannels,
 		SampleSize:   ssize,
+		ctx:          ctx,
+		cancel:       cancel,
 	}, nil
 }
 
 func (r *AudioReader) Close() {
-	for r.reading {
-		time.Sleep(100 * time.Millisecond)
-	}
+	r.cancel()   // signal any in-progress Read() to stop
+	r.wg.Wait()  // wait for it to finish before touching the stream
 
 	if r.Stream != nil {
 		r.Stream.Stop()
@@ -1391,10 +1400,12 @@ func (r *AudioReader) Rewind() error {
 }
 
 func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
-	r.reading = true
-	defer func() {
-		r.reading = false
-	}()
+	if err := r.ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	r.wg.Add(1)
+	defer r.wg.Done()
 
 	if r.Stream != nil {
 		// Read from PortAudio stream
@@ -1532,6 +1543,14 @@ func (app *DecoderApp) MainLoop() {
 
 		floatBuf, n, err := reader.Read()
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				// reader was closed cleanly (e.g. user switched source)
+				app.SetReader(nil)
+				if app.Wait {
+					continue
+				}
+				break
+			}
 			app.Status("Error: " + err.Error())
 			if app.Wait {
 				app.SetReader(nil)
