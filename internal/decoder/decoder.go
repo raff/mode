@@ -1524,8 +1524,23 @@ func (r *AudioReader) record(fb *audio.FloatBuffer) {
 	if r.RecordEncoder == nil {
 		return
 	}
-	ib := fb.AsIntBuffer()
-	ib.SourceBitDepth = 32
+	// go-audio's AsIntBuffer() casts float→int with no scaling, so float
+	// samples in [-1,1] all become 0 (silent). Scale manually to int16 range.
+	data := make([]int, len(fb.Data))
+	for i, s := range fb.Data {
+		v := int(s * math.MaxInt16)
+		if v > math.MaxInt16 {
+			v = math.MaxInt16
+		} else if v < math.MinInt16 {
+			v = math.MinInt16
+		}
+		data[i] = v
+	}
+	ib := &audio.IntBuffer{
+		Format:         fb.Format,
+		Data:           data,
+		SourceBitDepth: 16,
+	}
 	if err := r.RecordEncoder.Write(ib); err != nil {
 		log.Printf("record: write: %v", err)
 	}
