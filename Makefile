@@ -15,7 +15,7 @@ help:
 
 app: MoDe.app
 
-MoDe.app: gmode tmode Icon.png
+MoDe.app: gmode tmode cmd/gmode/Icon.png
 	# create Mode.app
 	fyne package -os darwin -sourceDir cmd/gmode -exe gmode -icon Icon.png -name MoDe
 	# copy TUI executable, just in case
