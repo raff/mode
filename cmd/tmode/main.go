@@ -617,6 +617,7 @@ func main() {
 			Fname:             *filter,
 			Verbose:           *verbose,
 			SpectralPeakRatio: float64(*squelch),
+			Spectrogram:       decoder.EmptySpectrogram,
 		},
 	}
 

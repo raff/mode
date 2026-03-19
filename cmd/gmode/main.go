@@ -645,6 +645,8 @@ func main() {
 
 	freqLabel := boldText("100")
 	audiospectrum := boldText("")
+	audiospectrum.Wrapping = fyne.TextWrapOff
+	audiospectrum.SetText(string(decoder.EmptySpectrogram[:]))
 	calcWpm := boldText("(00)")
 	textOut := NewTextLog("")
 	textOut.Wrapping = fyne.TextWrapWord

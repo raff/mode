@@ -355,6 +355,7 @@ func DetectDominantFrequency(magnitudes []float64, hammingSum float64, sampleRat
 }
 
 var levels = [8]rune{'\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588'}
+var EmptySpectrogram = [nBands]rune{'\u00A0', '\u00A0', '\u00A0', '\u00A0', '\u00A0', '\u00A0', '\u00A0', '\u00A0'}
 
 // Spectrogram generates a  spectrogram representation from the magnitude spectrum
 func Spectrogram(magnitudes []float64, hammingSum float64, sampleRate int, minFreq, maxFreq float64, graphic bool) (result [nBands]rune) {
