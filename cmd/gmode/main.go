@@ -29,6 +29,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"fyne.io/x/fyne/wrapper"
+
+	fynetooltip "github.com/dweymouth/fyne-tooltip"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 )
 
 //go:embed assets/fonts/UbuntuMono-R.ttf
@@ -355,6 +358,13 @@ func NewTextLog(text string) *TextLog {
 	return t
 }
 
+// NewButtonWithTooltip creates a new button with an icon and tooltip
+func NewButtonWithTooltip(tooltip string, icon fyne.Resource, onTapped func()) *ttwidget.Button {
+	btn := ttwidget.NewButtonWithIcon("", icon, onTapped)
+	btn.SetToolTip(tooltip)
+	return btn
+}
+
 // Append adds text to the log.
 // If text contains a space or the last segment isn't text, it adds a new TextSegment.
 func (t *TextLog) Append(text string) {
@@ -571,6 +581,8 @@ func main() {
 	myApp.Settings().SetTheme(&CompactTheme{})
 	myWindow := myApp.NewWindow("Morse Decoder")
 
+	fynetooltip.SetToolTipTextSizeName(theme.SizeNameText)
+
 	boldText := func(s string) *widget.Label {
 		return widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
 	}
@@ -638,7 +650,7 @@ func main() {
 	textOut.Wrapping = fyne.TextWrapWord
 	textOut.Scroll = container.ScrollVerticalOnly
 
-	deviceBtn := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() {
+	deviceBtn := NewButtonWithTooltip("Select device", theme.MediaMusicIcon(), func() {
 		l, err := decoder.ListAudioDevices(decoder.AudioIn)
 		if err != nil {
 			dialog.ShowError(err, myWindow)
@@ -685,7 +697,7 @@ func main() {
 		deviceDialog.Show()
 	})
 
-	fileBtn := widget.NewButtonWithIcon("", theme.FileAudioIcon(), func() {
+	fileBtn := NewButtonWithTooltip("Select audio file", theme.FileAudioIcon(), func() {
 		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
 				dialog.ShowError(err, myWindow)
@@ -713,7 +725,7 @@ func main() {
 	})
 
 	var recordFile *os.File
-	var recordBtn *widget.Button
+	var recordBtn *ttwidget.Button
 	stopRecording := func() {
 		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
 			enc := modeApp.Reader.RecordEncoder
@@ -727,11 +739,14 @@ func main() {
 			recordFile = nil
 		}
 		if recordBtn != nil {
-			fyne.Do(func() { recordBtn.SetText("Rec") })
+			fyne.Do(func() {
+				recordBtn.SetIcon(theme.MediaRecordIcon())
+				recordBtn.SetToolTip("Record audio")
+			})
 		}
 	}
 
-	recordBtn = widget.NewButton("Rec", func() {
+	recordBtn = NewButtonWithTooltip("Record audio", theme.MediaRecordIcon(), func() {
 		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
 			// Already recording — stop.
 			stopRecording()
@@ -764,7 +779,8 @@ func main() {
 			recordFile = f
 			enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
 			r.RecordEncoder = enc
-			recordBtn.SetText("■ Rec")
+			recordBtn.SetIcon(theme.MediaStopIcon())
+			recordBtn.SetToolTip("Stop recording")
 		}, myWindow)
 		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
 		fd.Show()
@@ -785,11 +801,13 @@ func main() {
 		calcWpm,
 	)
 
-	clearBtn := widget.NewButton("Clear", func() {
+	clearBtn := ttwidget.NewButton("Clear", func() {
 		textOut.Clear()
 	})
 
-	quitBtn := widget.NewButtonWithIcon("", theme.LogoutIcon(), func() {
+	clearBtn.SetToolTip("Clear decoded text")
+
+	quitBtn := NewButtonWithTooltip("Quit application", theme.LogoutIcon(), func() {
 		saveConfig()
 		myApp.Quit()
 	})
@@ -872,7 +890,7 @@ func main() {
 	go modeApp.MainLoop()
 
 	// Set the content and show the window
-	myWindow.SetContent(content)
+	myWindow.SetContent(fynetooltip.AddWindowToolTipLayer(content, myWindow.Canvas()))
 	myWindow.Resize(fyne.NewSize(600, 400))
 	myWindow.ShowAndRun()
 }

@@ -12,8 +12,8 @@ import (
 // Log writes decoded text to ~/mode-sessions/YYYY-MM-DD_HH-MM.txt.
 // Call Close() when the session ends to flush the buffer.
 type Log struct {
-	f   *os.File
-	bw  *bufio.Writer
+	f  *os.File
+	bw *bufio.Writer
 }
 
 // Open creates (or appends to) the session log file for the current time.

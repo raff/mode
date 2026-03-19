@@ -9,11 +9,11 @@ import (
 // Config holds persistent settings for the MoDe application.
 // Session-specific values (wpm, fwpm, wav path) are intentionally excluded.
 type Config struct {
-	Device    string  `json:"device,omitempty"`     // last selected audio input device
-	Filter    string  `json:"filter,omitempty"`     // filter name: "None", "Bandpass", "APF", "APF 2"
-	Squelch   int     `json:"squelch,omitempty"`    // spectral peak ratio (0–5)
-	Bandwidth float64 `json:"bandwidth,omitempty"`  // bandpass filter bandwidth in Hz
-	MinSNR    float64 `json:"min_snr,omitempty"`    // minimum SNR (envelope peak − floor) after normalization to gate noise
+	Device    string  `json:"device,omitempty"`    // last selected audio input device
+	Filter    string  `json:"filter,omitempty"`    // filter name: "None", "Bandpass", "APF", "APF 2"
+	Squelch   int     `json:"squelch,omitempty"`   // spectral peak ratio (0–5)
+	Bandwidth float64 `json:"bandwidth,omitempty"` // bandpass filter bandwidth in Hz
+	MinSNR    float64 `json:"min_snr,omitempty"`   // minimum SNR (envelope peak − floor) after normalization to gate noise
 }
 
 func configPath() (string, error) {
