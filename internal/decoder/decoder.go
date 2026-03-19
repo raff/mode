@@ -468,6 +468,18 @@ func String(t *ToneSegment) string {
 	return (*t).String()
 }
 
+// blockRMS returns the root-mean-square amplitude of a buffer.
+func blockRMS(data []float64) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range data {
+		sum += v * v
+	}
+	return math.Sqrt(sum / float64(len(data)))
+}
+
 // ComputeEnvelope calculates the amplitude envelope of the signal
 func ComputeEnvelope(data []float64, windowSize int) []float64 {
 	envelope := make([]float64, len(data))
@@ -1492,7 +1504,6 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		// record if needed
 		r.record(fb)
 
-		transforms.NormalizeMax(fb)
 		return fb, len(r.StreamBuffer.Data), nil
 	}
 
@@ -1514,7 +1525,6 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 
 		// Convert to FloatBuffer
 		fb := r.WavBuffer.AsFloatBuffer()
-		transforms.NormalizeMax(fb)
 
 		return fb, n, nil
 	}
@@ -1556,6 +1566,7 @@ type DecoderApp struct {
 	Mag               float64
 	prevFreq          float64
 	prevMag           float64
+	longTermRMS       float64 // exponentially weighted noise-floor RMS for cross-block gating
 	FreqSmoothAlpha   float64
 	FreqJumpFactor    float64
 	SpectralPeakRatio float64 // minimum peak/mean ratio to accept a dominant frequency (0 disables check)
@@ -1585,6 +1596,7 @@ func (app *DecoderApp) SetReader(r *AudioReader) {
 	}
 
 	app.Reader = r
+	app.longTermRMS = 0 // reset cross-block baseline on source change
 	app.mu.Unlock()
 
 	app.Status("")
@@ -1665,6 +1677,32 @@ func (app *DecoderApp) MainLoop() {
 
 		// Convert to mono (in place)
 		transforms.MonoDownmix(floatBuf)
+
+		// Cross-block noise gate: compare current block RMS to a long-term
+		// noise-floor estimate.  NormalizeMax (moved here from Read) is applied
+		// only after the gate passes so that block-to-block amplitude differences
+		// are preserved for the comparison.
+		rawRMS := blockRMS(floatBuf.Data)
+		const rmsAlpha = 0.05
+		if app.longTermRMS == 0 {
+			app.longTermRMS = rawRMS
+		} else if rawRMS < app.longTermRMS*3 {
+			// Only adapt from near-floor blocks; ignore signal bursts.
+			app.longTermRMS = app.longTermRMS*(1-rmsAlpha) + rawRMS*rmsAlpha
+		}
+		if app.MinSNR > 0 && app.longTermRMS > 0 && rawRMS < app.longTermRMS*(1+app.MinSNR*10) {
+			// Block is at the noise floor — accumulate silence without decoding.
+			silenceDur := float64(len(floatBuf.Data)) / float64(reader.SampleRate)
+			if prevTone != nil && prevTone.Type == Silence {
+				prevTone.Duration += silenceDur
+				prevTone.EndTime += silenceDur
+			} else {
+				st := ToneSegment{Type: Silence, Duration: silenceDur, EndTime: silenceDur}
+				prevTone = &st
+			}
+			continue
+		}
+		transforms.NormalizeMax(floatBuf)
 
 		d := float64(len(floatBuf.Data)) / float64(reader.SampleRate)
 		app.Duration += int(d * 1000)
