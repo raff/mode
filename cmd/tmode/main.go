@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/raff/mode/internal/config"
@@ -436,7 +438,7 @@ func main() {
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
-	record := flag.String("record", "", "save incoming audio to a WAV file")
+	record := flag.Bool("record", false, "save incoming audio to a WAV file in the sessions folder")
 	verbose := flag.Bool("verbose", false, "log segment durations and dit/dah classifications to stderr")
 
 	flag.Parse()
@@ -635,11 +637,17 @@ func main() {
 	}
 
 	// Set up WAV recording if requested.
-	if *record != "" {
-		recFile, err := os.OpenFile(*record, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if *record {
+		dir, err := session.Dir()
 		if err != nil {
-			log.Fatalf("record: open %s: %v", *record, err)
+			log.Fatalf("record: sessions dir: %v", err)
 		}
+		wavPath := filepath.Join(dir, time.Now().Format("2006-01-02_15-04-05")+".wav")
+		recFile, err := os.OpenFile(wavPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			log.Fatalf("record: open %s: %v", wavPath, err)
+		}
+		log.Printf("recording to %s", wavPath)
 		enc := wav.NewEncoder(recFile, app.Reader.SampleRate, 16, app.Reader.Channels, 1)
 		app.Reader.RecordEncoder = enc
 		defer func() {
@@ -679,5 +687,17 @@ func main() {
 		return
 	}
 
-	app.MainLoop()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.MainLoop()
+	}()
+
+	select {
+	case <-sigCh:
+	case <-done:
+	}
 }

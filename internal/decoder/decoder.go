@@ -1527,6 +1527,9 @@ func (r *AudioReader) Read() (*audio.FloatBuffer, int, error) {
 		// Convert to FloatBuffer
 		fb := r.WavBuffer.AsFloatBuffer()
 
+		// record if needed
+		r.record(fb)
+
 		return fb, n, nil
 	}
 

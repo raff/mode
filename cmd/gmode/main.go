@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
@@ -726,8 +727,24 @@ func main() {
 		fd.Show()
 	})
 
+	slog := session.Open()
+	defer func() { slog.Close() }()
+
 	var recordFile *os.File
 	var recordBtn *ttwidget.Button
+
+	showRecordingPopup := func(msg string) {
+		fyne.Do(func() {
+			lbl := widget.NewLabel(msg)
+			pop := widget.NewModalPopUp(lbl, myWindow.Canvas())
+			pop.Show()
+			go func() {
+				time.Sleep(time.Second)
+				fyne.Do(pop.Hide)
+			}()
+		})
+	}
+
 	stopRecording := func() {
 		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
 			enc := modeApp.Reader.RecordEncoder
@@ -736,7 +753,9 @@ func main() {
 				log.Printf("record close: %v", err)
 			}
 		}
+		var savedName string
 		if recordFile != nil {
+			savedName = filepath.Base(recordFile.Name())
 			recordFile.Close()
 			recordFile = nil
 		}
@@ -745,6 +764,12 @@ func main() {
 				recordBtn.SetIcon(theme.MediaRecordIcon())
 				recordBtn.SetToolTip("Record audio")
 			})
+		}
+		// Start a fresh session for text decoded after recording
+		slog.Close()
+		slog = session.Open()
+		if savedName != "" {
+			showRecordingPopup("Saved: " + savedName)
 		}
 	}
 
@@ -755,37 +780,41 @@ func main() {
 			return
 		}
 
-		fd := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
-			if err != nil {
-				dialog.ShowError(err, myWindow)
-				return
-			}
-			if w == nil {
-				return
-			}
+		r := modeApp.Reader
+		if r == nil {
+			return
+		}
 
-			r := modeApp.Reader
-			if r == nil {
-				w.Close()
-				return
-			}
+		// Stop current session; start a new one tied to this recording.
+		slog.Close()
+		t := time.Now()
+		slog = session.OpenAt(t)
 
-			f, err := os.OpenFile(w.URI().Path(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-			if err != nil {
-				dialog.ShowError(err, myWindow)
-				w.Close()
-				return
-			}
-			w.Close() // Fyne's writer is not needed; we use os.File for io.WriteSeeker
+		// Create WAV in the sessions directory with the same timestamp.
+		dir, err := session.Dir()
+		if err != nil {
+			dialog.ShowError(err, myWindow)
+			slog.Close()
+			slog = session.Open()
+			return
+		}
+		baseName := t.Format("2006-01-02_15-04-05")
+		wavPath := filepath.Join(dir, baseName+".wav")
 
-			recordFile = f
-			enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
-			r.RecordEncoder = enc
-			recordBtn.SetIcon(theme.MediaStopIcon())
-			recordBtn.SetToolTip("Stop recording")
-		}, myWindow)
-		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
-		fd.Show()
+		f, err := os.OpenFile(wavPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			dialog.ShowError(err, myWindow)
+			slog.Close()
+			slog = session.Open()
+			return
+		}
+
+		recordFile = f
+		enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
+		r.RecordEncoder = enc
+		recordBtn.SetIcon(theme.MediaStopIcon())
+		recordBtn.SetToolTip("Stop recording")
+		showRecordingPopup(baseName + ".wav")
 	})
 	defer stopRecording()
 
@@ -829,9 +858,6 @@ func main() {
 		nil,                 // right
 		withBorder(textOut), // middle
 	)
-
-	slog := session.Open()
-	defer slog.Close()
 
 	cleanMinToneDur := 0.0
 	if *clean {
