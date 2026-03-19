@@ -1,6 +1,7 @@
 package decoder_test
 
 import (
+	"encoding/json"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -13,8 +14,8 @@ import (
 	"github.com/raff/mode/internal/decoder"
 )
 
-// decodeWAV runs the decoder against a WAV file and returns the decoded text.
-func decodeWAV(t *testing.T, wavPath string) string {
+// decodeWAVWith runs the decoder against a WAV file using the given MorseDecoder and returns the decoded text.
+func decodeWAVWith(t *testing.T, wavPath string, mode *decoder.MorseDecoder) string {
 	t.Helper()
 
 	f, err := os.Open(wavPath)
@@ -40,7 +41,7 @@ func decodeWAV(t *testing.T, wavPath string) string {
 		MinFreq:           300,
 		MaxFreq:           2000,
 		Reader:            reader,
-		Mode:              decoder.NewMorseDecoder(20, 0, 0.75),
+		Mode:              mode,
 		Filter:            decoder.Denoise,
 		SpectralPeakRatio: 3,
 		AddText: func(s string) {
@@ -77,7 +78,7 @@ func TestNoiseGateSuppressesNoise(t *testing.T) {
 	// Pure Gaussian noise has SNR ≈ 0.018 after NormalizeMax; real CW chunks
 	// have SNR ≥ 0.08.  A threshold of 0.1 sits cleanly in the gap.
 	const minSNR = 0.1
-	segments := decoder.DetectMorseTones(fb, 20, 0.5, 700, 300, minSNR, 20, 0)
+	segments := decoder.DetectMorseTones(fb, 20, 0.5, 700, 300, minSNR, 20, 0, 0)
 
 	for _, seg := range segments {
 		if seg.Type == decoder.Sound {
@@ -86,8 +87,17 @@ func TestNoiseGateSuppressesNoise(t *testing.T) {
 	}
 }
 
+// fixtureParams holds optional decoder parameters for a WAV fixture.
+// If testdata/<name>.json exists, its values override the defaults.
+type fixtureParams struct {
+	WPM  int     `json:"wpm"`
+	FWPM int     `json:"fwpm"`
+	ST   float64 `json:"st"`
+}
+
 // TestWAVFixtures decodes every testdata/*.wav and compares against testdata/*.txt.
 // The .txt file is the golden output: regenerate with `go run ./cmd/tmode -noui <file.wav>`.
+// A companion testdata/<name>.json can override decoder params (wpm, fwpm, st).
 func TestWAVFixtures(t *testing.T) {
 	wavFiles, err := filepath.Glob("../../testdata/*.wav")
 	if err != nil {
@@ -104,7 +114,6 @@ func TestWAVFixtures(t *testing.T) {
 	defer portaudio.Terminate()
 
 	for _, wavPath := range wavFiles {
-		wavPath := wavPath
 		name := strings.TrimSuffix(filepath.Base(wavPath), ".wav")
 
 		t.Run(name, func(t *testing.T) {
@@ -115,7 +124,26 @@ func TestWAVFixtures(t *testing.T) {
 					goldenPath, wavPath, name)
 			}
 
-			got := decodeWAV(t, wavPath)
+			// Use default params, overridden by a companion .json if present.
+			wpm, fwpm, st := 20, 0, 0.75
+			paramsPath := filepath.Join("../../testdata", name+".json")
+			if data, err := os.ReadFile(paramsPath); err == nil {
+				var p fixtureParams
+				if err := json.Unmarshal(data, &p); err != nil {
+					t.Fatalf("parse %s: %v", paramsPath, err)
+				}
+				if p.WPM != 0 {
+					wpm = p.WPM
+				}
+				if p.FWPM != 0 {
+					fwpm = p.FWPM
+				}
+				if p.ST != 0 {
+					st = p.ST
+				}
+			}
+
+			got := decodeWAVWith(t, wavPath, decoder.NewMorseDecoder(wpm, fwpm, st))
 			want := strings.TrimRight(string(golden), "\n")
 
 			if got != want {
@@ -124,3 +152,4 @@ func TestWAVFixtures(t *testing.T) {
 		})
 	}
 }
+

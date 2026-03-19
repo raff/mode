@@ -429,6 +429,7 @@ func main() {
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	squelch := flag.Int("squelch", 3, "squelch level to consider signal present (0 disables)")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
+	clean := flag.Bool("clean", false, "optimize for clean/synthetic audio: disables SNR gate and adds light envelope dither")
 	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
 	filter := flag.String("filter", "bp", "apply bandpass filter (bp), audio peak filter (apf), or no filter (none)")
@@ -583,6 +584,19 @@ func main() {
 		*filter = "no"
 	}
 
+	cleanMinToneDur := 0.0
+	if *clean {
+		if !explicitFlags["dither"] {
+			*dither = 0.001
+		}
+		if !explicitFlags["minsnr"] {
+			*noiseGate = 0
+		}
+		// ditTime/2 filters out bandpass-filter ringing artifacts (~10-22ms) at
+		// sharp tone edges in clean signals, while keeping real inter-element gaps (~40ms+).
+		cleanMinToneDur = 0.6 / float64(*wpm)
+	}
+
 	app := App{
 		gui:       g,
 		startTime: time.Now(),
@@ -593,6 +607,7 @@ func main() {
 			MinSNR:            *noiseGate,
 			NoiseFloorPct:     *noisePct,
 			Dither:            *dither,
+			MinToneDur:        cleanMinToneDur,
 			MinFreq:           *minFreq,
 			MaxFreq:           *maxFreq,
 			Reader:            reader,
