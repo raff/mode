@@ -45,3 +45,9 @@ Uses `github.com/jroimartin/gocui` for a terminal UI. Has a `//go:build nobuild`
 - The `main.go` TUI build tag (`nobuild`) means `go build .` only builds the GUI. Use explicit file lists to build the TUI
 - The TUI's `-noui` flag disables the interactive interface and writes decoded text to stdout — useful for testing: `go run main.go decoder.go -noui <file.wav>` will decode a WAV file containing a CW transmission and print the decoded words
 - The macOS app bundle requires the `fyne` CLI tool (`go install fyne.io/fyne/v2/cmd/fyne@latest`)
+
+## Design System
+Always read `DESIGN.md` before making any visual or UI decisions.
+All font choices, colors, spacing, and aesthetic direction are defined there.
+Do not deviate without explicit user approval.
+In QA mode, flag any code that doesn't match `DESIGN.md`.

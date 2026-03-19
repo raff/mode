@@ -68,7 +68,43 @@ func (t CompactTheme) Font(style fyne.TextStyle) fyne.Resource {
 }
 
 func (t CompactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	return theme.DefaultTheme().Color(name, variant)
+	switch name {
+	case theme.ColorNameBackground:
+		return color.NRGBA{R: 0x0D, G: 0x11, B: 0x17, A: 0xFF}
+	case theme.ColorNameForeground:
+		return color.NRGBA{R: 0xE6, G: 0xED, B: 0xF3, A: 0xFF}
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 0xE8, G: 0x89, B: 0x0C, A: 0xFF}
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 0x2D, G: 0x33, B: 0x3B, A: 0xFF}
+	case theme.ColorNameInputBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameDisabled:
+		return color.NRGBA{R: 0x8B, G: 0x94, B: 0x9E, A: 0xFF}
+	case theme.ColorNamePlaceHolder:
+		return color.NRGBA{R: 0x8B, G: 0x94, B: 0x9E, A: 0xFF}
+	case theme.ColorNameHover:
+		return color.NRGBA{R: 0x1F, G: 0x29, B: 0x37, A: 0xFF}
+	case theme.ColorNameFocus:
+		return color.NRGBA{R: 0xE8, G: 0x89, B: 0x0C, A: 0x80}
+	case theme.ColorNameSeparator:
+		return color.NRGBA{R: 0x30, G: 0x36, B: 0x3D, A: 0xFF}
+	case theme.ColorNameScrollBar:
+		return color.NRGBA{R: 0x30, G: 0x36, B: 0x3D, A: 0xFF}
+	case theme.ColorNameSuccess:
+		return color.NRGBA{R: 0x3F, G: 0xB9, B: 0x50, A: 0xFF}
+	case theme.ColorNameWarning:
+		return color.NRGBA{R: 0xD2, G: 0x99, B: 0x22, A: 0xFF}
+	case theme.ColorNameError:
+		return color.NRGBA{R: 0xF8, G: 0x51, B: 0x49, A: 0xFF}
+	case theme.ColorNameOverlayBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameMenuBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameHeaderBackground:
+		return color.NRGBA{R: 0x0D, G: 0x11, B: 0x17, A: 0xFF}
+	}
+	return theme.DefaultTheme().Color(name, theme.VariantDark)
 }
 
 func (t CompactTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
@@ -542,7 +578,7 @@ func main() {
 	withBorder := func(o fyne.CanvasObject) fyne.CanvasObject {
 		return NewBorderedContainer(
 			o,
-			theme.DefaultTheme().Color(theme.ColorNameForeground, myApp.Settings().ThemeVariant()), // border color
+			color.NRGBA{R: 0x6E, G: 0x76, B: 0x81, A: 0xFF}, // border color (#6E7681)
 			2, // corner radius
 			1, // border width
 			0, // padding
