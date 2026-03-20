@@ -1541,17 +1541,27 @@ func (r *AudioReader) record(fb *audio.FloatBuffer) {
 	if r.RecordEncoder == nil {
 		return
 	}
-	// go-audio's AsIntBuffer() casts float→int with no scaling, so float
-	// samples in [-1,1] all become 0 (silent). Scale manually to int16 range.
 	data := make([]int, len(fb.Data))
-	for i, s := range fb.Data {
-		v := int(s * math.MaxInt16)
-		if v > math.MaxInt16 {
-			v = math.MaxInt16
-		} else if v < math.MinInt16 {
-			v = math.MinInt16
+	if r.Stream != nil {
+		// Live stream: Float32Buffer.AsFloatBuffer() normalizes to [-1, 1].
+		// go-audio's AsIntBuffer() casts float→int with no scaling, so those
+		// samples all become 0 (silent). Scale manually to int16 range.
+		for i, s := range fb.Data {
+			v := int(s * math.MaxInt16)
+			if v > math.MaxInt16 {
+				v = math.MaxInt16
+			} else if v < math.MinInt16 {
+				v = math.MinInt16
+			}
+			data[i] = v
 		}
-		data[i] = v
+	} else {
+		// WAV file: IntBuffer.AsFloatBuffer() does a plain int→float cast
+		// with no normalization, so values are already in int16 range.
+		// Cast straight back to int — no scaling needed.
+		for i, s := range fb.Data {
+			data[i] = int(s)
+		}
 	}
 	ib := &audio.IntBuffer{
 		Format:         fb.Format,
