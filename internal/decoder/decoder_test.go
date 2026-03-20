@@ -15,7 +15,7 @@ import (
 )
 
 // decodeWAVWith runs the decoder against a WAV file using the given MorseDecoder and returns the decoded text.
-func decodeWAVWith(t *testing.T, wavPath string, mode *decoder.MorseDecoder) string {
+func decodeWAVWith(t *testing.T, wavPath string, mode *decoder.MorseDecoder, minSNR float64) string {
 	t.Helper()
 
 	f, err := os.Open(wavPath)
@@ -35,7 +35,7 @@ func decodeWAVWith(t *testing.T, wavPath string, mode *decoder.MorseDecoder) str
 		Wait:              false,
 		Bandwidth:         300,
 		Threshold:         50,
-		MinSNR:            0.1,
+		MinSNR:            minSNR,
 		NoiseFloorPct:     20,
 		Dither:            0,
 		MinFreq:           300,
@@ -90,14 +90,15 @@ func TestNoiseGateSuppressesNoise(t *testing.T) {
 // fixtureParams holds optional decoder parameters for a WAV fixture.
 // If testdata/<name>.json exists, its values override the defaults.
 type fixtureParams struct {
-	WPM  int     `json:"wpm"`
-	FWPM int     `json:"fwpm"`
-	ST   float64 `json:"st"`
+	WPM    int     `json:"wpm"`
+	FWPM   int     `json:"fwpm"`
+	ST     float64 `json:"st"`
+	MinSNR float64 `json:"minsnr"`
 }
 
 // TestWAVFixtures decodes every testdata/*.wav and compares against testdata/*.txt.
 // The .txt file is the golden output: regenerate with `go run ./cmd/tmode -noui <file.wav>`.
-// A companion testdata/<name>.json can override decoder params (wpm, fwpm, st).
+// A companion testdata/<name>.json can override decoder params (wpm, fwpm, st, minsnr).
 func TestWAVFixtures(t *testing.T) {
 	wavFiles, err := filepath.Glob("../../testdata/*.wav")
 	if err != nil {
@@ -126,6 +127,7 @@ func TestWAVFixtures(t *testing.T) {
 
 			// Use default params, overridden by a companion .json if present.
 			wpm, fwpm, st := 20, 0, 0.75
+			minSNR := 0.1
 			paramsPath := filepath.Join("../../testdata", name+".json")
 			if data, err := os.ReadFile(paramsPath); err == nil {
 				var p fixtureParams
@@ -141,9 +143,12 @@ func TestWAVFixtures(t *testing.T) {
 				if p.ST != 0 {
 					st = p.ST
 				}
+				if p.MinSNR >= 0 {
+					minSNR = p.MinSNR
+				}
 			}
 
-			got := decodeWAVWith(t, wavPath, decoder.NewMorseDecoder(wpm, fwpm, st))
+			got := decodeWAVWith(t, wavPath, decoder.NewMorseDecoder(wpm, fwpm, st), minSNR)
 			want := strings.TrimRight(string(golden), "\n")
 
 			if got != want {

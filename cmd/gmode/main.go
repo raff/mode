@@ -551,7 +551,7 @@ func main() {
 
 		defer f.Close()
 
-		reader, err = decoder.FromWaveFile(f, 1) // *ssize)
+		reader, err = decoder.FromWaveFile(f, 1)
 		if err != nil {
 			log.Fatal(err)
 		}
