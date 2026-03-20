@@ -14,6 +14,8 @@ Notes:
     	bandwidth for bandpass filter (in Hz) (default 300)
     -buffer int
     	buffer size (in ms) (default 300)
+    -clean
+    	optimize for clean/synthetic audio: disables SNR gate and adds light envelope dither
     -device string
     	input audio device (for live decoding)
     -dither float
@@ -28,20 +30,26 @@ Notes:
     	maximum frequency (in Hz) (default 2000)
     -minfreq float
     	minimum frequency (in Hz) (default 300)
+    -minsnr float
+    	minimum SNR (signal − noise floor) required to process a chunk; 0 disables (default 0.1)
     -noisepct float
     	percentile for noise floor estimation (1-80) (default 20)
-    -noisegate float
-    	Noise gate (squelch) level (0.0-1.0) (default 0.2)
     -noui
     	no user interface, write to stdout
     -play string
     	output audio device (for monitoring)
+    -record
+    	save incoming audio to a WAV file in the sessions folder
     -separator
     	output separator '_' between decoded segments
+    -squelch int
+    	squelch level (spectral peak/mean ratio) to consider signal present; 0 disables (default 3)
     -st int
     	speed threshold (%) to consider a tone valid (default 75)
     -threshold int
     	Ratio (%) between min and max signal level to be considered a valid tone (default 50)
+    -verbose
+    	log segment durations and dit/dah classifications to stderr
     -wpm int
     	words per minute (for timing) (default 20)
 
