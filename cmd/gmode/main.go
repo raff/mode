@@ -555,6 +555,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		reader.Id = filepath.Base(inputFile)
 	}
 
 	if *out != "" {
@@ -580,9 +581,20 @@ func main() {
 	}
 
 	// Create a new application
+	windowTitle := func(id string) string {
+		if id == "" {
+			return "Morse Decoder"
+		}
+		return "Morse Decoder — " + id
+	}
+
 	myApp := app.New()
 	myApp.Settings().SetTheme(&CompactTheme{})
-	myWindow := myApp.NewWindow("Morse Decoder")
+	title := "Morse Decoder"
+	if reader != nil {
+		title = windowTitle(reader.Id)
+	}
+	myWindow := myApp.NewWindow(title)
 
 	fynetooltip.SetToolTipTextSizeName(theme.SizeNameText)
 
@@ -694,6 +706,7 @@ func main() {
 
 				// do something with ar
 				modeApp.SetReader(ar)
+				myWindow.SetTitle(windowTitle(ar.Id))
 				saveConfig()
 			},
 			myWindow,
@@ -721,9 +734,11 @@ func main() {
 			}
 
 			log.Println("file selected:", reader.URI())
+			wr.Id = filepath.Base(reader.URI().Path())
 
 			// do something with wr
 			modeApp.SetReader(wr)
+			myWindow.SetTitle(windowTitle(wr.Id))
 		}, myWindow)
 		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
 		fd.Show()

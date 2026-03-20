@@ -40,7 +40,7 @@ func (app *App) Layout(g *gocui.Gui) (err error) {
 			return err
 		}
 
-		app.vinfo.Title = "MoDe - Morse Decoder"
+		app.vinfo.Title = "MoDe - " + app.Reader.Id
 	}
 
 	app.vmain, err = g.SetView("main", 0, 3, maxX-1, maxY-5)
@@ -556,6 +556,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
+			reader.Id = filepath.Base(inputFile)
 		} else if *noui {
 			log.Fatal("no input source specified")
 		} else {
