@@ -425,7 +425,7 @@ func main() {
 	}
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
-	if !explicitFlags["device"] && cfg.Device != "" {
+	if !explicitFlags["device"] && cfg.Device != "" && flag.NArg() == 0 {
 		*dev = cfg.Device
 	}
 	if !explicitFlags["filter"] && cfg.Filter != "" {
@@ -446,9 +446,9 @@ func main() {
 	// assigned later (after the Fyne UI is wired up).
 	var modeApp decoder.DecoderApp
 	saveConfig := func() {
-		dev := ""
-		if modeApp.Reader != nil {
-			dev = modeApp.Reader.Id
+		dev := cfg.Device // preserve saved device by default
+		if modeApp.Reader != nil && modeApp.Reader.WavDecoder == nil {
+			dev = modeApp.Reader.Id // update only when using a live stream
 		}
 		filterName := *filter
 		if modeApp.Filter == nil {
@@ -535,9 +535,13 @@ func main() {
 	if *dev != "" {
 		reader, err = decoder.FromAudioStream(*dev, *ssize)
 		if err != nil {
-			log.Fatal(err)
+			if explicitFlags["device"] {
+				log.Fatal(err)
+			}
+			log.Printf("saved device unavailable, use device selection: %v", err)
 		}
-	} else if flag.NArg() >= 1 {
+	}
+	if reader == nil && flag.NArg() >= 1 {
 		inputFile := flag.Arg(0)
 
 		f, err := os.Open(inputFile)
@@ -551,8 +555,6 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else {
-		// log.Fatal("no input source specified")
 	}
 
 	if *out != "" {

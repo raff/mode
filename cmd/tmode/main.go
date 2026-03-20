@@ -450,7 +450,7 @@ func main() {
 	}
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
-	if !explicitFlags["device"] && cfg.Device != "" {
+	if !explicitFlags["device"] && cfg.Device != "" && flag.NArg() == 0 {
 		*dev = cfg.Device
 	}
 	if !explicitFlags["filter"] && cfg.Filter != "" {
@@ -535,26 +535,32 @@ func main() {
 	if *dev != "" {
 		reader, err = decoder.FromAudioStream(*dev, *ssize)
 		if err != nil {
-			log.Fatal(err)
+			if explicitFlags["device"] {
+				log.Fatal(err)
+			}
+			log.Printf("saved device unavailable, selecting new device: %v", err)
 		}
-	} else if flag.NArg() >= 1 {
-		inputFile := flag.Arg(0)
+	}
+	if reader == nil {
+		if flag.NArg() >= 1 {
+			inputFile := flag.Arg(0)
 
-		f, err := os.Open(inputFile)
-		if err != nil {
-			log.Fatal(err)
+			f, err := os.Open(inputFile)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			defer f.Close()
+
+			reader, err = decoder.FromWaveFile(f, 1) // *ssize)
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else if *noui {
+			log.Fatal("no input source specified")
+		} else {
+			reader = guiSelectAudio(*ssize)
 		}
-
-		defer f.Close()
-
-		reader, err = decoder.FromWaveFile(f, 1) // *ssize)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else if *noui {
-		log.Fatal("no input source specified")
-	} else {
-		reader = guiSelectAudio(*ssize)
 	}
 
 	if *out != "" {
@@ -661,7 +667,10 @@ func main() {
 
 	// Persist settings now that all values (including config-loaded defaults) are resolved.
 	if app.Reader != nil {
-		devName := app.Reader.Id
+		devName := cfg.Device // preserve saved device by default
+		if app.Reader.WavDecoder == nil {
+			devName = app.Reader.Id // update only when using a live stream
+		}
 		saveErr := config.Save(config.Config{
 			Device:    devName,
 			Filter:    *filter,
