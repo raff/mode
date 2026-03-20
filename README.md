@@ -6,7 +6,9 @@ A morse decoder that can decode audio from a device (i.e. SDR or ham radio) or a
 Usage: mode [options] [filename]
 
 Notes:
-- `-dither` can help stabilize decoding on very noisy or very clean signals by adding a tiny envelope offset. Start with `-dither=0.001` and adjust as needed. Use `0` to disable.
+- **Clean/synthetic audio** (e.g. computer-generated WAV files with no noise): use `-clean`. Real-world transmissions always have some background noise, which actually helps the envelope detector find tone boundaries. The `-clean` flag adds a light artificial noise floor (`-dither 0.001`) and disables the SNR gate (`-minsnr 0`) so that near-silent buffers are not suppressed. If the file also uses Farnsworth timing, set `-wpm` and `-fwpm` to match — e.g. `-wpm 25 -fwpm 10` for 25 WPM characters at 10 WPM text speed.
+- **Noisy audio with Farnsworth timing**: if you know the recording speed, pass `-wpm` and `-fwpm` explicitly. Noise can compress individual dits below the default speed threshold (`-st 75`); lowering to `-st 50` accepts dits as short as 50% of the nominal dit duration, which helps in high-noise conditions.
+- `-dither` can be used directly to fine-tune the artificial noise floor added to the envelope (overrides the value set by `-clean`). Use `0` to disable.
 
     -bandwidth float
     	bandwidth for bandpass filter (in Hz) (default 300)

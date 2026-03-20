@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/raff/mode/internal/config"
@@ -429,13 +431,14 @@ func main() {
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	squelch := flag.Int("squelch", 3, "squelch level to consider signal present (0 disables)")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
+	clean := flag.Bool("clean", false, "optimize for clean/synthetic audio: disables SNR gate and adds light envelope dither")
 	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
 	filter := flag.String("filter", "bp", "apply bandpass filter (bp), audio peak filter (apf), or no filter (none)")
 	minFreq := flag.Float64("minfreq", 300.0, "minimum frequency (in Hz)")
 	maxFreq := flag.Float64("maxfreq", 2000.0, "maximum frequency (in Hz)")
 	noui := flag.Bool("noui", false, "no user interface, write to stdout")
-	record := flag.String("record", "", "save incoming audio to a WAV file")
+	record := flag.Bool("record", false, "save incoming audio to a WAV file in the sessions folder")
 	verbose := flag.Bool("verbose", false, "log segment durations and dit/dah classifications to stderr")
 
 	flag.Parse()
@@ -583,6 +586,19 @@ func main() {
 		*filter = "no"
 	}
 
+	cleanMinToneDur := 0.0
+	if *clean {
+		if !explicitFlags["dither"] {
+			*dither = 0.001
+		}
+		if !explicitFlags["minsnr"] {
+			*noiseGate = 0
+		}
+		// ditTime/2 filters out bandpass-filter ringing artifacts (~10-22ms) at
+		// sharp tone edges in clean signals, while keeping real inter-element gaps (~40ms+).
+		cleanMinToneDur = 0.6 / float64(*wpm)
+	}
+
 	app := App{
 		gui:       g,
 		startTime: time.Now(),
@@ -593,6 +609,7 @@ func main() {
 			MinSNR:            *noiseGate,
 			NoiseFloorPct:     *noisePct,
 			Dither:            *dither,
+			MinToneDur:        cleanMinToneDur,
 			MinFreq:           *minFreq,
 			MaxFreq:           *maxFreq,
 			Reader:            reader,
@@ -602,6 +619,7 @@ func main() {
 			Fname:             *filter,
 			Verbose:           *verbose,
 			SpectralPeakRatio: float64(*squelch),
+			Spectrogram:       decoder.EmptySpectrogram,
 		},
 	}
 
@@ -619,11 +637,17 @@ func main() {
 	}
 
 	// Set up WAV recording if requested.
-	if *record != "" {
-		recFile, err := os.OpenFile(*record, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if *record {
+		dir, err := session.Dir()
 		if err != nil {
-			log.Fatalf("record: open %s: %v", *record, err)
+			log.Fatalf("record: sessions dir: %v", err)
 		}
+		wavPath := filepath.Join(dir, time.Now().Format("2006-01-02_15-04-05")+".wav")
+		recFile, err := os.OpenFile(wavPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			log.Fatalf("record: open %s: %v", wavPath, err)
+		}
+		log.Printf("recording to %s", wavPath)
 		enc := wav.NewEncoder(recFile, app.Reader.SampleRate, 16, app.Reader.Channels, 1)
 		app.Reader.RecordEncoder = enc
 		defer func() {
@@ -663,5 +687,17 @@ func main() {
 		return
 	}
 
-	app.MainLoop()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.MainLoop()
+	}()
+
+	select {
+	case <-sigCh:
+	case <-done:
+	}
 }

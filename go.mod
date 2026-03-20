@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	fyne.io/fyne/v2 v2.7.1
 	fyne.io/x/fyne v0.0.0-20251214153509-fa68a7d234d5
+	github.com/dweymouth/fyne-tooltip v0.4.0
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/transforms v0.0.0-20180121090939-51830ccc35a5
 	github.com/go-audio/wav v1.1.0

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/raff/mode/internal/config"
 	"github.com/raff/mode/internal/decoder"
@@ -29,6 +30,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"fyne.io/x/fyne/wrapper"
+
+	fynetooltip "github.com/dweymouth/fyne-tooltip"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 )
 
 //go:embed assets/fonts/UbuntuMono-R.ttf
@@ -68,7 +72,43 @@ func (t CompactTheme) Font(style fyne.TextStyle) fyne.Resource {
 }
 
 func (t CompactTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	return theme.DefaultTheme().Color(name, variant)
+	switch name {
+	case theme.ColorNameBackground:
+		return color.NRGBA{R: 0x0D, G: 0x11, B: 0x17, A: 0xFF}
+	case theme.ColorNameForeground:
+		return color.NRGBA{R: 0xE6, G: 0xED, B: 0xF3, A: 0xFF}
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 0xE8, G: 0x89, B: 0x0C, A: 0xFF}
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 0x2D, G: 0x33, B: 0x3B, A: 0xFF}
+	case theme.ColorNameInputBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameDisabled:
+		return color.NRGBA{R: 0x8B, G: 0x94, B: 0x9E, A: 0xFF}
+	case theme.ColorNamePlaceHolder:
+		return color.NRGBA{R: 0x8B, G: 0x94, B: 0x9E, A: 0xFF}
+	case theme.ColorNameHover:
+		return color.NRGBA{R: 0x1F, G: 0x29, B: 0x37, A: 0xFF}
+	case theme.ColorNameFocus:
+		return color.NRGBA{R: 0xE8, G: 0x89, B: 0x0C, A: 0x80}
+	case theme.ColorNameSeparator:
+		return color.NRGBA{R: 0x30, G: 0x36, B: 0x3D, A: 0xFF}
+	case theme.ColorNameScrollBar:
+		return color.NRGBA{R: 0x30, G: 0x36, B: 0x3D, A: 0xFF}
+	case theme.ColorNameSuccess:
+		return color.NRGBA{R: 0x3F, G: 0xB9, B: 0x50, A: 0xFF}
+	case theme.ColorNameWarning:
+		return color.NRGBA{R: 0xD2, G: 0x99, B: 0x22, A: 0xFF}
+	case theme.ColorNameError:
+		return color.NRGBA{R: 0xF8, G: 0x51, B: 0x49, A: 0xFF}
+	case theme.ColorNameOverlayBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameMenuBackground:
+		return color.NRGBA{R: 0x16, G: 0x1B, B: 0x22, A: 0xFF}
+	case theme.ColorNameHeaderBackground:
+		return color.NRGBA{R: 0x0D, G: 0x11, B: 0x17, A: 0xFF}
+	}
+	return theme.DefaultTheme().Color(name, theme.VariantDark)
 }
 
 func (t CompactTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
@@ -319,6 +359,13 @@ func NewTextLog(text string) *TextLog {
 	return t
 }
 
+// NewButtonWithTooltip creates a new button with an icon and tooltip
+func NewButtonWithTooltip(tooltip string, icon fyne.Resource, onTapped func()) *ttwidget.Button {
+	btn := ttwidget.NewButtonWithIcon("", icon, onTapped)
+	btn.SetToolTip(tooltip)
+	return btn
+}
+
 // Append adds text to the log.
 // If text contains a space or the last segment isn't text, it adds a new TextSegment.
 func (t *TextLog) Append(text string) {
@@ -360,6 +407,7 @@ func main() {
 	threshold := flag.Int("threshold", 50, "Ratio (%) between min and max signal level to be considered a valid tone")
 	squelch := flag.Int("squelch", 3, "squelch level (0-5) for spectral peak detection")
 	dither := flag.Float64("dither", 0, "envelope dither amount (0 disables)")
+	clean := flag.Bool("clean", false, "optimize for clean/synthetic audio: disables SNR gate and adds light envelope dither")
 	noisePct := flag.Float64("noisepct", 20, "percentile for noise floor estimation (1-80)")
 	st := flag.Int("st", 75, "speed threshold (%) to consider a tone valid")
 	filter := flag.String("filter", "bp", "apply bandpass filter (bp), audio peak filter (apf), or no filter (none)")
@@ -534,6 +582,8 @@ func main() {
 	myApp.Settings().SetTheme(&CompactTheme{})
 	myWindow := myApp.NewWindow("Morse Decoder")
 
+	fynetooltip.SetToolTipTextSizeName(theme.SizeNameText)
+
 	boldText := func(s string) *widget.Label {
 		return widget.NewLabelWithStyle(s, fyne.TextAlignLeading, fyne.TextStyle{Bold: true, Monospace: true})
 	}
@@ -541,7 +591,7 @@ func main() {
 	withBorder := func(o fyne.CanvasObject) fyne.CanvasObject {
 		return NewBorderedContainer(
 			o,
-			theme.DefaultTheme().Color(theme.ColorNameForeground, myApp.Settings().ThemeVariant()), // border color
+			color.NRGBA{R: 0x6E, G: 0x76, B: 0x81, A: 0xFF}, // border color (#6E7681)
 			2, // corner radius
 			1, // border width
 			0, // padding
@@ -596,12 +646,14 @@ func main() {
 
 	freqLabel := boldText("100")
 	audiospectrum := boldText("")
+	audiospectrum.Wrapping = fyne.TextWrapOff
+	audiospectrum.SetText(string(decoder.EmptySpectrogram[:]))
 	calcWpm := boldText("(00)")
 	textOut := NewTextLog("")
 	textOut.Wrapping = fyne.TextWrapWord
 	textOut.Scroll = container.ScrollVerticalOnly
 
-	deviceBtn := widget.NewButtonWithIcon("", theme.MediaMusicIcon(), func() {
+	deviceBtn := NewButtonWithTooltip("Select device", theme.MediaMusicIcon(), func() {
 		l, err := decoder.ListAudioDevices(decoder.AudioIn)
 		if err != nil {
 			dialog.ShowError(err, myWindow)
@@ -648,7 +700,7 @@ func main() {
 		deviceDialog.Show()
 	})
 
-	fileBtn := widget.NewButtonWithIcon("", theme.FileAudioIcon(), func() {
+	fileBtn := NewButtonWithTooltip("Select audio file", theme.FileAudioIcon(), func() {
 		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
 				dialog.ShowError(err, myWindow)
@@ -675,8 +727,24 @@ func main() {
 		fd.Show()
 	})
 
+	slog := session.Open()
+	defer func() { slog.Close() }()
+
 	var recordFile *os.File
-	var recordBtn *widget.Button
+	var recordBtn *ttwidget.Button
+
+	showRecordingPopup := func(msg string) {
+		fyne.Do(func() {
+			lbl := widget.NewLabel(msg)
+			pop := widget.NewModalPopUp(lbl, myWindow.Canvas())
+			pop.Show()
+			go func() {
+				time.Sleep(time.Second)
+				fyne.Do(pop.Hide)
+			}()
+		})
+	}
+
 	stopRecording := func() {
 		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
 			enc := modeApp.Reader.RecordEncoder
@@ -685,52 +753,68 @@ func main() {
 				log.Printf("record close: %v", err)
 			}
 		}
+		var savedName string
 		if recordFile != nil {
+			savedName = filepath.Base(recordFile.Name())
 			recordFile.Close()
 			recordFile = nil
 		}
 		if recordBtn != nil {
-			fyne.Do(func() { recordBtn.SetText("Rec") })
+			fyne.Do(func() {
+				recordBtn.SetIcon(theme.MediaRecordIcon())
+				recordBtn.SetToolTip("Record audio")
+			})
+		}
+		// Start a fresh session for text decoded after recording
+		slog.Close()
+		slog = session.Open()
+		if savedName != "" {
+			showRecordingPopup("Saved: " + savedName)
 		}
 	}
 
-	recordBtn = widget.NewButton("Rec", func() {
+	recordBtn = NewButtonWithTooltip("Record audio", theme.MediaRecordIcon(), func() {
 		if modeApp.Reader != nil && modeApp.Reader.RecordEncoder != nil {
 			// Already recording — stop.
 			stopRecording()
 			return
 		}
 
-		fd := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
-			if err != nil {
-				dialog.ShowError(err, myWindow)
-				return
-			}
-			if w == nil {
-				return
-			}
+		r := modeApp.Reader
+		if r == nil {
+			return
+		}
 
-			r := modeApp.Reader
-			if r == nil {
-				w.Close()
-				return
-			}
+		// Stop current session; start a new one tied to this recording.
+		slog.Close()
+		t := time.Now()
+		slog = session.OpenAt(t)
 
-			f, err := os.OpenFile(w.URI().Path(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-			if err != nil {
-				dialog.ShowError(err, myWindow)
-				w.Close()
-				return
-			}
-			w.Close() // Fyne's writer is not needed; we use os.File for io.WriteSeeker
+		// Create WAV in the sessions directory with the same timestamp.
+		dir, err := session.Dir()
+		if err != nil {
+			dialog.ShowError(err, myWindow)
+			slog.Close()
+			slog = session.Open()
+			return
+		}
+		baseName := t.Format("2006-01-02_15-04-05")
+		wavPath := filepath.Join(dir, baseName+".wav")
 
-			recordFile = f
-			enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
-			r.RecordEncoder = enc
-			recordBtn.SetText("■ Rec")
-		}, myWindow)
-		fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav"}))
-		fd.Show()
+		f, err := os.OpenFile(wavPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			dialog.ShowError(err, myWindow)
+			slog.Close()
+			slog = session.Open()
+			return
+		}
+
+		recordFile = f
+		enc := wav.NewEncoder(f, r.SampleRate, 16, r.Channels, 1)
+		r.RecordEncoder = enc
+		recordBtn.SetIcon(theme.MediaStopIcon())
+		recordBtn.SetToolTip("Stop recording")
+		showRecordingPopup(baseName + ".wav")
 	})
 	defer stopRecording()
 
@@ -748,11 +832,13 @@ func main() {
 		calcWpm,
 	)
 
-	clearBtn := widget.NewButton("Clear", func() {
+	clearBtn := ttwidget.NewButton("Clear", func() {
 		textOut.Clear()
 	})
 
-	quitBtn := widget.NewButtonWithIcon("", theme.LogoutIcon(), func() {
+	clearBtn.SetToolTip("Clear decoded text")
+
+	quitBtn := NewButtonWithTooltip("Quit application", theme.LogoutIcon(), func() {
 		saveConfig()
 		myApp.Quit()
 	})
@@ -773,8 +859,18 @@ func main() {
 		withBorder(textOut), // middle
 	)
 
-	slog := session.Open()
-	defer slog.Close()
+	cleanMinToneDur := 0.0
+	if *clean {
+		if !explicitFlags["dither"] {
+			*dither = 0.001
+		}
+		if !explicitFlags["minsnr"] {
+			*noiseGate = 0
+		}
+		// ditTime/2 filters out bandpass-filter ringing artifacts (~10-22ms) at
+		// sharp tone edges in clean signals, while keeping real inter-element gaps (~40ms+).
+		cleanMinToneDur = 0.6 / float64(*wpm)
+	}
 
 	modeApp = decoder.DecoderApp{
 		Wait: true,
@@ -784,6 +880,7 @@ func main() {
 		MinSNR:            *noiseGate,
 		NoiseFloorPct:     *noisePct,
 		Dither:            *dither,
+		MinToneDur:        cleanMinToneDur,
 		MinFreq:           *minFreq,
 		MaxFreq:           *maxFreq,
 		Reader:            reader,
@@ -821,7 +918,7 @@ func main() {
 	go modeApp.MainLoop()
 
 	// Set the content and show the window
-	myWindow.SetContent(content)
+	myWindow.SetContent(fynetooltip.AddWindowToolTipLayer(content, myWindow.Canvas()))
 	myWindow.Resize(fyne.NewSize(600, 400))
 	myWindow.ShowAndRun()
 }
